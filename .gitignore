@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+
+# Build output
+dist/
+*.egg-info/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Docker
+.docker/
+
+# Temp files
+/tmp/
+*.tmp
+
+# Config with secrets
+config/settings.json
+
+# Claude settings (contains command history with secrets)
+.claude/settings.local.json
+
+# Test files
+test_*.png

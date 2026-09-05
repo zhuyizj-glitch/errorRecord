@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>错题集 - AI 驱动的智能错题管理系统</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --primary: #6366f1;
+  --primary-light: #818cf8;
+  --primary-dark: #4f46e5;
+  --accent: #f59e0b;
+  --success: #10b981;
+  --bg: #0f0f1a;
+  --bg-card: #1a1a2e;
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --gradient-1: linear-gradient(135deg, #6366f1, #a855f7);
+  --gradient-2: linear-gradient(135deg, #3b82f6, #06b6d4);
+  --gradient-3: linear-gradient(135deg, #f59e0b, #ef4444);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow-x: hidden;
+  line-height: 1.7;
+}
+
+/* Animated background */
+.bg-animation {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  overflow: hidden;
+}
+
+.bg-animation::before {
+  content: '';
+  position: absolute;
+  width: 200%;
+  height: 200%;
+  top: -50%;
+  left: -50%;
+  background: radial-gradient(circle at 30% 40%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
+              radial-gradient(circle at 70% 60%, rgba(168, 85, 247, 0.06) 0%, transparent 50%),
+              radial-gradient(circle at 50% 80%, rgba(59, 130, 246, 0.05) 0%, transparent 50%);
+  animation: bgRotate 60s linear infinite;
+}
+
+@keyframes bgRotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Navigation */
+nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 16px 40px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(15, 15, 26, 0.8);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+nav .logo {
+  font-size: 22px;
+  font-weight: 700;
+  background: var(--gradient-1);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+nav .links {
+  display: flex;
+  gap: 32px;
+}
+
+nav .links a {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.3s;
+}
+
+nav .links a:hover {
+  color: var(--text);
+}
+
+/* Hero Section */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 120px 20px 80px;
+  position: relative;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 100px;
+  font-size: 13px;
+  color: var(--primary-light);
+  margin-bottom: 32px;
+  animation: fadeInUp 0.8s ease;
+}
+
+.hero h1 {
+  font-size: clamp(40px, 7vw, 80px);
+  font-weight: 900;
+  line-height: 1.1;
+  margin-bottom: 24px;
+  animation: fadeInUp 0.8s ease 0.1s both;
+}
+
+.hero h1 .gradient {
+  background: var(--gradient-1);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero p {
+  font-size: clamp(16px, 2vw, 20px);
+  color: var(--text-muted);
+  max-width: 600px;
+  margin-bottom: 40px;
+  animation: fadeInUp 0.8s ease 0.2s both;
+}
+
+.hero-buttons {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  animation: fadeInUp 0.8s ease 0.3s both;
+}
+
+.btn-primary {
+  padding: 14px 32px;
+  background: var(--gradient-1);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  text-decoration: none;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 40px rgba(99, 102, 241, 0.4);
+}
+
+.btn-secondary {
+  padding: 14px 32px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+
+.btn-secondary:hover {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.4);
+}
+
+/* Floating elements */
+.hero-visual {
+  margin-top: 60px;
+  position: relative;
+  width: 100%;
+  max-width: 800px;
+  animation: fadeInUp 0.8s ease 0.4s both;
+}
+
+.mock-window {
+  background: var(--bg-card);
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.1);
+  overflow: hidden;
+  box-shadow: 0 40px 80px rgba(0,0,0,0.5);
+}
+
+.mock-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.03);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.mock-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.mock-dot.red { background: #ff5f57; }
+.mock-dot.yellow { background: #febc2e; }
+.mock-dot.green { background: #28c840; }
+
+.mock-content {
+  padding: 24px;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mock-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.mock-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--gradient-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+
+.mock-nav {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.mock-nav-item {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.03);
+}
+
+.mock-nav-item.active {
+  background: rgba(99, 102, 241, 0.2);
+  color: var(--primary-light);
+}
+
+.mock-upload-area {
+  border: 2px dashed rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { border-color: rgba(99, 102, 241, 0.2); }
+  50% { border-color: rgba(99, 102, 241, 0.5); }
+}
+
+.mock-upload-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+/* Section styling */
+section {
+  padding: 100px 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.section-header {
+  text-align: center;
+  margin-bottom: 60px;
+}
+
+.section-header .tag {
+  display: inline-block;
+  padding: 6px 14px;
+  background: rgba(99, 102, 241, 0.1);
+  border-radius: 100px;
+  font-size: 13px;
+  color: var(--primary-light);
+  margin-bottom: 16px;
+}
+
+.section-header h2 {
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 800;
+  margin-bottom: 16px;
+}
+
+.section-header p {
+  font-size: 17px;
+  color: var(--text-muted);
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* Features grid */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+}
+
+.feature-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 20px;
+  padding: 32px;
+  transition: all 0.3s;
+  opacity: 0;
+  transform: translateY(30px);
+}
+
+.feature-card.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.feature-card:hover {
+  border-color: rgba(99, 102, 241, 0.3);
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+}
+
+.feature-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  margin-bottom: 20px;
+}
+
+.feature-card h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.feature-card p {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+/* Workflow section */
+.workflow {
+  position: relative;
+}
+
+.workflow-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.workflow-line {
+  position: absolute;
+  left: 32px;
+  top: 40px;
+  bottom: 40px;
+  width: 2px;
+  background: linear-gradient(to bottom, var(--primary), transparent);
+}
+
+.workflow-step {
+  display: flex;
+  gap: 24px;
+  padding: 24px 0;
+  opacity: 0;
+  transform: translateX(-30px);
+  transition: all 0.6s ease;
+}
+
+.workflow-step.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.step-number {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 2px solid var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--primary-light);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.step-content h3 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.step-content p {
+  color: var(--text-muted);
+  font-size: 15px;
+}
+
+/* Stats section */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 24px;
+  margin-top: 60px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  padding: 32px;
+  text-align: center;
+}
+
+.stat-number {
+  font-size: 48px;
+  font-weight: 900;
+  background: var(--gradient-1);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 8px;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* Architecture section */
+.arch-diagram {
+  background: var(--bg-card);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 20px;
+  padding: 40px;
+  margin-top: 40px;
+}
+
+.arch-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.arch-box {
+  padding: 16px 24px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  min-width: 140px;
+}
+
+.arch-box.primary {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: var(--primary-light);
+}
+
+.arch-box.secondary {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+}
+
+.arch-box.accent {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+}
+
+.arch-box.success {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+.arch-arrow {
+  font-size: 24px;
+  color: var(--text-muted);
+}
+
+.arch-arrow.down {
+  transform: rotate(90deg);
+}
+
+/* Footer */
+footer {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+
+/* Animations */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: all 0.8s ease;
+}
+
+.fade-in.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  nav {
+    padding: 12px 20px;
+  }
+
+  nav .links {
+    gap: 16px;
+  }
+
+  nav .links a {
+    font-size: 12px;
+  }
+
+  section {
+    padding: 60px 20px;
+  }
+
+  .mock-content {
+    padding: 16px;
+  }
+
+  .arch-row {
+    flex-direction: column;
+  }
+
+  .arch-arrow.down {
+    transform: rotate(90deg);
+  }
+}
+
+/* Typing animation */
+.typing-text {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  border-right: 2px solid var(--primary);
+  animation: typing 3s steps(30) 1s both, blink 0.8s step-end infinite;
+}
+
+@keyframes typing {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+@keyframes blink {
+  50% { border-color: transparent; }
+}
+
+/* Glow effect */
+.glow {
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: 0.15;
+  pointer-events: none;
+}
+
+.glow-1 {
+  background: #6366f1;
+  top: 20%;
+  left: 10%;
+  animation: float 8s ease-in-out infinite;
+}
+
+.glow-2 {
+  background: #a855f7;
+  bottom: 20%;
+  right: 10%;
+  animation: float 10s ease-in-out infinite reverse;
+}
+
+@keyframes float {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(30px, -30px); }
+}
+</style>
+</head>
+<body>
+
+<div class="bg-animation"></div>
+<div class="glow glow-1"></div>
+<div class="glow glow-2"></div>
+
+<nav>
+  <div class="logo">📝 错题集</div>
+  <div class="links">
+    <a href="#features">功能</a>
+    <a href="#workflow">流程</a>
+    <a href="#architecture">架构</a>
+    <a href="#tech">技术</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="hero-badge">
+    ✨ AI 驱动 · 本地存储 · 多端同步
+  </div>
+  <h1>
+    智能<span class="gradient">错题管理</span><br>
+    让学习更高效
+  </h1>
+  <p>
+    拍照上传 → AI 自动分析 → 归档到 Obsidian → 智能复习计划<br>
+    为两个孩子量身打造的全科错题管理系统
+  </p>
+  <div class="hero-buttons">
+    <a href="#workflow" class="btn-primary">了解工作流程 →</a>
+    <a href="#features" class="btn-secondary">查看核心功能</a>
+  </div>
+
+  <div class="hero-visual">
+    <div class="mock-window">
+      <div class="mock-titlebar">
+        <div class="mock-dot red"></div>
+        <div class="mock-dot yellow"></div>
+        <div class="mock-dot green"></div>
+        <span style="margin-left: 12px; font-size: 12px; color: var(--text-muted);">错题集 — localhost:5173</span>
+      </div>
+      <div class="mock-content">
+        <div class="mock-header">
+          <div class="mock-avatar">👧</div>
+          <select style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 6px 12px; color: var(--text); font-size: 13px;">
+            <option>数学</option>
+          </select>
+          <div class="mock-nav">
+            <div class="mock-nav-item active">📷 上传</div>
+            <div class="mock-nav-item">📋 列表</div>
+            <div class="mock-nav-item">🔄 复习</div>
+          </div>
+        </div>
+        <div class="mock-upload-area">
+          <div class="mock-upload-icon">📷</div>
+          <div>点击上传或拖拽图片到此处</div>
+          <div style="font-size: 12px; margin-top: 4px; opacity: 0.6;">支持 jpg / png / heic，单张 ≤ 20MB</div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <div style="padding: 10px 24px; background: var(--gradient-1); border-radius: 8px; font-size: 14px; font-weight: 600;">🔍 开始分析</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="section-header fade-in">
+    <div class="tag">核心功能</div>
+    <h2>为学习场景深度设计</h2>
+    <p>从拍照上传到智能复习，覆盖错题管理的完整生命周期</p>
+  </div>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(99, 102, 241, 0.15);">📸</div>
+      <h3>拍照即录</h3>
+      <p>手机拍照上传手写试卷、印刷题目、数学图形。支持多张图片合并为一道题，AI 自动识别文字内容。</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(168, 85, 247, 0.15);">🤖</div>
+      <h3>AI 智能分析</h3>
+      <p>多模态大模型自动识别题目、给出正确答案、分析错误原因。支持可配置的多款 AI 服务（OpenAI / Claude / 国产模型）。</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(59, 130, 246, 0.15);">📊</div>
+      <h3>掌握度评估</h3>
+      <p>基于错误次数、难度、错误类型、时间衰减的多维度评分算法，量化每个知识点的掌握程度（0-100 分）。</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(245, 158, 11, 0.15);">🔁</div>
+      <h3>重复犯错检测</h3>
+      <p>自动识别同一知识点的重复犯错模式，标记顽固错误，帮助精准打击薄弱环节。</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(16, 185, 129, 0.15);">📅</div>
+      <h3>间隔复习计划</h3>
+      <p>根据掌握度自动安排复习节奏：薄弱题每天练，已掌握题按月复习。类似 Anki 的科学记忆曲线。</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(239, 68, 68, 0.15);">📝</div>
+      <h3>Obsidian 归档</h3>
+      <p>所有错题以 Markdown 文件存储，通过 OneDrive 自动同步。可直接在 Obsidian 中查看、搜索、使用 Dataview 查询。</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(236, 72, 153, 0.15);">👨‍👩‍👧‍👦</div>
+      <h3>多孩子管理</h3>
+      <p>支持多个孩子各自独立的错题集，每个孩子的学科可单独配置。一键切换，互不干扰。</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(20, 184, 166, 0.15);">💬</div>
+      <h3>家长备注</h3>
+      <p>上传时可添加家长的观察和建议，与 AI 分析互为补充。记录孩子学习过程中的重要细节。</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(132, 204, 22, 0.15);">📱</div>
+      <h3>多端访问</h3>
+      <p>Web 应用支持电脑、平板、手机访问。同一 WiFi 下手机可直接拍照上传，随时随地记录错题。</p>
+    </div>
+  </div>
+</section>
+
+<section id="workflow" class="workflow">
+  <div class="section-header fade-in">
+    <div class="tag">工作流程</div>
+    <h2>四步完成错题归档</h2>
+    <p>从拍照到复习，简单高效</p>
+  </div>
+
+  <div class="workflow-steps">
+    <div class="workflow-line"></div>
+
+    <div class="workflow-step">
+      <div class="step-number">1</div>
+      <div class="step-content">
+        <h3>📸 拍照上传</h3>
+        <p>选择孩子和学科，拍照或拖拽上传题目图片。支持手写题、印刷题、数学图形等多种类型。</p>
+      </div>
+    </div>
+
+    <div class="workflow-step">
+      <div class="step-number">2</div>
+      <div class="step-content">
+        <h3>🤖 AI 分析</h3>
+        <p>AI 自动识别题目内容，给出正确答案和解题过程，分析孩子的错误原因和学习建议。</p>
+      </div>
+    </div>
+
+    <div class="workflow-step">
+      <div class="step-number">3</div>
+      <div class="step-content">
+        <h3>✏️ 确认保存</h3>
+        <p>预览 AI 分析结果，可修改补充。添加家长备注后保存，自动生成 Markdown 文件归档到 Obsidian。</p>
+      </div>
+    </div>
+
+    <div class="workflow-step">
+      <div class="step-number">4</div>
+      <div class="step-content">
+        <h3>🔄 智能复习</h3>
+        <p>系统根据掌握度评分和间隔复习算法，自动推送今日待复习的错题，追踪重做结果。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="section-header fade-in">
+    <div class="tag">系统架构</div>
+    <h2>轻量级本地部署</h2>
+    <p>数据完全在自己手里，不依赖云服务</p>
+  </div>
+
+  <div class="arch-diagram fade-in">
+    <div class="arch-row">
+      <div class="arch-box primary">📱 手机 / 平板</div>
+      <div class="arch-box primary">💻 电脑浏览器</div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-arrow down">→</div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-box secondary">⚛️ React 前端<br><small>宿主机 :5173</small></div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-arrow down">→</div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-box accent">🐳 Docker 后端<br><small>FastAPI :8001</small></div>
+      <div class="arch-box accent">🤖 LLM API<br><small>可配置多模型</small></div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-arrow down">→</div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-box success">📁 Obsidian Vault<br><small>Markdown 文件</small></div>
+      <div class="arch-box success">☁️ OneDrive 同步<br><small>自动云备份</small></div>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card fade-in">
+      <div class="stat-number">100%</div>
+      <div class="stat-label">数据本地存储</div>
+    </div>
+    <div class="stat-card fade-in">
+      <div class="stat-number">9</div>
+      <div class="stat-label">支持学科数</div>
+    </div>
+    <div class="stat-card fade-in">
+      <div class="stat-number">∞</div>
+      <div class="stat-label">可扩展能力</div>
+    </div>
+  </div>
+</section>
+
+<section id="tech">
+  <div class="section-header fade-in">
+    <div class="tag">技术栈</div>
+    <h2>现代技术，稳定可靠</h2>
+  </div>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(99, 102, 241, 0.15);">⚛️</div>
+      <h3>React + TypeScript</h3>
+      <p>现代化前端框架，类型安全，组件化开发。Vite 构建，极速热更新。</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(16, 185, 129, 0.15);">🐍</div>
+      <h3>Python FastAPI</h3>
+      <p>高性能异步后端，自动生成 API 文档。Docker 容器化部署，一键启动。</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(59, 130, 246, 0.15);">🗂️</div>
+      <h3>Obsidian + Markdown</h3>
+      <p>知识管理利器，支持双向链接、Dataview 查询、Spaced Repetition 复习插件。</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(245, 158, 11, 0.15);">🤖</div>
+      <h3>多模态 LLM</h3>
+      <p>兼容 OpenAI API 格式，支持 GPT-4o、Claude、国产大模型、本地 Ollama。可随时切换。</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>📝 错题集 — AI 驱动的智能错题管理系统</p>
+  <p style="margin-top: 8px; opacity: 0.6;">为两个孩子的成长保驾护航 ❤️</p>
+</footer>
+
+<script>
+// Intersection Observer for scroll animations
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, {
+  threshold: 0.1,
+  rootMargin: '0px 0px -50px 0px'
+});
+
+// Observe all animated elements
+document.querySelectorAll('.fade-in, .feature-card, .workflow-step').forEach(el => {
+  observer.observe(el);
+});
+
+// Stagger animation for feature cards
+document.querySelectorAll('.feature-card').forEach((card, i) => {
+  card.style.transitionDelay = `${i * 0.1}s`;
+});
+
+document.querySelectorAll('.workflow-step').forEach((step, i) => {
+  step.style.transitionDelay = `${i * 0.2}s`;
+});
+
+// Smooth scroll for navigation links
+document.querySelectorAll('nav a[href^="#"]').forEach(link => {
+  link.addEventListener('click', e => {
+    e.preventDefault();
+    const target = document.querySelector(link.getAttribute('href'));
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+});
+
+// Parallax effect for glow elements
+document.addEventListener('mousemove', e => {
+  const x = e.clientX / window.innerWidth;
+  const y = e.clientY / window.innerHeight;
+
+  document.querySelectorAll('.glow').forEach((glow, i) => {
+    const speed = (i + 1) * 20;
+    glow.style.transform = `translate(${x * speed}px, ${y * speed}px)`;
+  });
+});
+</script>
+
+</body>
+</html>

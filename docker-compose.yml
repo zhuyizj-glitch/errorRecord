@@ -1,0 +1,16 @@
+services:
+  backend:
+    build: ./backend
+    container_name: mistakes-backend
+    ports:
+      - "8001:8000"
+    volumes:
+      # Obsidian vault（写入错题文件）
+      - ${VAULT_PATH}:/vault
+      # 持久化配置（LLM 设置等）
+      - ./config:/app/config
+    environment:
+      - VAULT_PATH=/vault
+      - CONFIG_PATH=/app/config
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+    restart: unless-stopped
