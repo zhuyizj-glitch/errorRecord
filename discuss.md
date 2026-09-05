@@ -33,6 +33,7 @@
    - 8.16 数学公式渲染优化
    - 8.17 任务列表与错题列表增强
    - 8.18 待做事项
+   - 8.19 Git 版本控制
 
 ---
 
@@ -1500,3 +1501,55 @@ async def update_question(question_id, new_child, new_subject):
 | P11 | 错题列表增强（移动到其他孩子/学科） | ✅ 已完成 |
 | - | 产品介绍页面 | ✅ 已完成 |
 | - | Tailscale 手机访问 | ✅ 已完成 |
+| - | Git 版本控制 | ✅ 已完成 |
+
+### 8.19 Git 版本控制
+
+> 日期：2026-09-05
+
+**初始化配置：**
+
+```bash
+# 初始化仓库
+git init
+
+# 配置用户
+git config user.email "user@example.com"
+git config user.name "User"
+
+# 添加远程仓库
+git remote add origin https://github.com/zhuyizj-glitch/errorRecord.git
+
+# 配置 credential helper（macOS Keychain）
+git config --global credential.helper osxkeychain
+```
+
+**.gitignore 配置：**
+
+排除敏感文件：
+- `config/settings.json` - 包含 API key
+- `.claude/settings.local.json` - 包含命令历史中的 API key
+- `.env` - 环境配置
+- `node_modules/` - 依赖包
+
+**仓库信息：**
+
+| 项目 | 值 |
+|---|---|
+| 远程地址 | https://github.com/zhuyizj-glitch/errorRecord |
+| 分支 | main |
+| 初始提交 | v0.1.0 (b05057b) |
+| 文件数 | 58 个文件，13,914 行代码 |
+
+**日常使用：**
+
+```bash
+git add .
+git commit -m "提交说明"
+git push
+```
+
+**安全注意：**
+- ✅ API key 等敏感信息已排除
+- ✅ 凭证已保存到 macOS Keychain
+- ✅ 可直接 `git push` 无需每次输入密码
