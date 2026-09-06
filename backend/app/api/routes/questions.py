@@ -53,9 +53,9 @@ async def create_question(q: QuestionCreate):
             )
             image_paths.append(dest)
 
-    # 构建 frontmatter
-    mastery_score = analyzer.calculate_mastery_score(0)
-    mastery_level = analyzer.mastery_level_from_score(mastery_score)
+    # 构建 frontmatter（新错题初始掌握度为 0）
+    mastery_score = 0  # 新错题还没重做过，初始为 0
+    mastery_level = "low"
     mastery_status = "new"
 
     frontmatter = {
@@ -69,6 +69,9 @@ async def create_question(q: QuestionCreate):
         "error_date": q.error_date.isoformat(),
         "created_at": date.today().isoformat(),
         "redo_count": 0,
+        "correct_count": 0,      # 重做做对次数
+        "wrong_count": 0,        # 重做做错次数
+        "consecutive_correct": 0, # 当前连续做对次数
         "mastery_score": mastery_score,
         "mastery_level": mastery_level,
         "mastery_status": mastery_status,
@@ -281,17 +284,25 @@ async def redo_question(
         "note": req.note,
     })
 
-    # 重新计算掌握度
-    last_error = date.today()
-    difficulty = full_data.get("difficulty", "中等")
-    low_diff_errors = 1 if difficulty in ("简单", "容易") and req.result == "wrong" else 0
+    # 更新做对/做错计数
+    correct_count = full_data.get("correct_count", 0)
+    wrong_count = full_data.get("wrong_count", 0)
+    consecutive_correct = full_data.get("consecutive_correct", 0)
 
+    if req.result == "correct":
+        correct_count += 1
+        consecutive_correct += 1
+    else:
+        wrong_count += 1
+        consecutive_correct = 0  # 做错则连续计数归零
+
+    # 重新计算掌握度（新算法）
     mastery_score = calculate_mastery_score(
-        redo_count=redo_count,
-        low_diff_errors=low_diff_errors,
-        last_error_date=last_error if req.result == "wrong" else None,
+        correct_count=correct_count,
+        wrong_count=wrong_count,
+        consecutive_correct=consecutive_correct,
     )
-    mastery_level = mastery_level_from_score(mastery_score)
+    mastery_level = mastery_level_from_score(mastery_score, consecutive_correct)
     mastery_status = mastery_status_from(redo_count, mastery_level)
 
     # 计算下次复习日期
@@ -300,6 +311,9 @@ async def redo_question(
 
     # 更新字段
     full_data["redo_count"] = redo_count
+    full_data["correct_count"] = correct_count
+    full_data["wrong_count"] = wrong_count
+    full_data["consecutive_correct"] = consecutive_correct
     full_data["redo_history"] = redo_history
     full_data["last_redo_at"] = date.today().isoformat()
     full_data["mastery_score"] = mastery_score
