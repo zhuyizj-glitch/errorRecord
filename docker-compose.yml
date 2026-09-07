@@ -9,8 +9,18 @@ services:
       - ${VAULT_PATH}:/vault
       # 持久化配置（LLM 设置等）
       - ./config:/app/config
+      # IMA 凭证
+      - ~/.config/ima:/root/.config/ima:ro
+      # ima-skills skill
+      - ~/.claude/skills/@tencent-adm/ima-skills:/root/.claude/skills/@tencent-adm/ima-skills:ro
     environment:
       - VAULT_PATH=/vault
       - CONFIG_PATH=/app/config
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+      # IMA 配置
+      - IMA_ENABLED=${IMA_ENABLED:-false}
+      - IMA_API_KEY=${IMA_API_KEY:-}
+      - IMA_CLIENT_ID=${IMA_CLIENT_ID:-}
+      - IMA_KNOWLEDGE_BASE_ID=${IMA_KNOWLEDGE_BASE_ID:-}
+      - IMA_SYNC_INTERVAL_HOURS=${IMA_SYNC_INTERVAL_HOURS:-12}
     restart: unless-stopped

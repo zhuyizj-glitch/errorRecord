@@ -1698,3 +1698,128 @@ git checkout v0.1.0
 - ✅ 统计仪表盘
 - ✅ 所有 Bug 修复
 - ✅ 完整设计文档（discuss.md）
+
+### 8.23 IMA 知识库集成
+
+> 日期：2026-09-07
+
+将腾讯 IMA 作为主数据库，Obsidian 作为下游本地副本（Phase 2 架构）。
+
+#### 架构设计
+
+```
+┌──────────────┐
+│   Frontend   │
+└──────┬───────┘
+       │ HTTP API（接口不变）
+       ▼
+┌──────────────────┐
+│ Storage Manager  │  主备策略
+└──┬────────────┬──┘
+   │ 主          │ 降级
+   ▼            ▼
+┌─────────┐  ┌──────────┐
+│ IMA     │  │ File     │
+│ 知识库   │  │ Obsidian │
+└────┬────┘  └──────────┘
+     │ 定时同步（12h）+ 手动触发
+     └──────────────►
+```
+
+#### 新增文件
+
+| 文件 | 职责 |
+|---|---|
+| `services/ima_client.py` | IMA OpenAPI 客户端，通过 ima-skills 的 `ima_api.cjs` 调用 |
+| `services/ima_storage.py` | IMA 存储后端，实现 StorageBackend 协议 |
+| `services/file_storage.py` | 本地文件存储后端（降级方案） |
+| `services/storage_backend.py` | 存储接口协议定义 |
+| `services/storage_manager.py` | 主备存储管理器，自动故障转移 |
+| `services/sync_service.py` | IMA → Obsidian 单向同步 |
+| `services/scheduler.py` | APScheduler 定时任务（每 12 小时） |
+| `api/routes/sync.py` | 同步 API（手动触发 + 状态查询） |
+
+#### IMA API 接入方式
+
+**关键：不直接调 REST API，而是通过官方 skill 的 Node 脚本调用。**
+
+```python
+# 通过 subprocess 调用 ima_api.cjs
+proc = await asyncio.create_subprocess_exec(
+    "node", "~/.claude/skills/@tencent-adm/ima-skills/ima_api.cjs",
+    endpoint,                              # 如 openapi/note/v1/import_doc
+    json.dumps(payload),
+    json.dumps({"clientId": ..., "apiKey": ...}),
+)
+```
+
+**凭证位置：** `~/.config/ima/client_id` 和 `~/.config/ima/api_key`
+
+#### 核心 API 端点
+
+| 操作 | 端点 | 关键参数 |
+|---|---|---|
+| 创建笔记 | `openapi/note/v1/import_doc` | `content_format=1`（必须，Markdown） |
+| 列出笔记 | `openapi/note/v1/list_note_by_folder_id` | `limit ≤ 20` |
+| 读取笔记 | `openapi/note/v1/get_doc_content` | `target_content_format` |
+| 搜索笔记 | `openapi/note/v1/search_note` | `search_type=0` + `query_info.title` |
+| 列出知识库 | `openapi/wiki/v1/search_knowledge_base` | `query=""` 列出全部，`limit ≤ 20` |
+| 浏览知识库 | `openapi/wiki/v1/get_knowledge_list` | 可传 `folder_id` 进子文件夹 |
+| 添加到知识库 | `openapi/wiki/v1/add_knowledge` | `media_type=11` + `title`（必填）+ `note_info.content_id` |
+
+#### 踩坑记录
+
+| 问题 | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| API 全部 404 | 所有端点返回 404 | 端点路径猜错（试过 `/api/v1/notes` 等 5 种） | 正确路径是 `openapi/note/v1/*` |
+| 认证失败 | `clientID or apiKey is empty` | 直接用 httpx 调 REST API，header 格式不对 | 改用 skill 的 `ima_api.cjs` 脚本 |
+| 凭证不匹配 | `skill auth failed` | `~/.config/ima/` 里存的是旧 key | 更新为当前有效凭证 |
+| 创建笔记失败 | `ImportDoc just support markdown` | 缺少 `content_format` | 加上 `content_format: 1` |
+| limit 超限 | `value must be inside range (0, 20]` | 传了 `limit=100` / `limit=50` | 统一 `min(limit, 20)` |
+| frontmatter 解析失败 | 读回来的字段全是 None | IMA 把 `---` 转成了 `***` + `-----`，并转义了 `_` → `\_` | `_parse_note_content()` 支持 3 种格式，还原转义字符 |
+| **笔记没进知识库** | 保存成功但知识库为空 | **`docker-compose.yml` 的 `environment` 段没传 IMA 变量**，容器内 `IMA_ENABLED=False`、知识库 ID 为空 | 补齐 5 个环境变量 |
+| add_knowledge 失败 | 静默失败 | 缺少必填的 `title` | 补上 `title` 参数 |
+
+#### 自动归类实现
+
+新增 `find_folder_by_path()`，按「孩子/学科」路径逐层查找文件夹（`media_type=99`）：
+
+```python
+folder_id = await client.find_folder_by_path(kb_id, ["女儿", "数学"])
+await client.add_note_to_knowledge_base(
+    note_id=note_id, knowledge_base_id=kb_id,
+    title=title, folder_id=folder_id,
+)
+```
+
+#### Docker 配置变更
+
+```yaml
+volumes:
+  - ~/.config/ima:/root/.config/ima:ro                    # IMA 凭证
+  - ~/.claude/skills/@tencent-adm/ima-skills:/root/.claude/skills/@tencent-adm/ima-skills:ro
+environment:
+  - IMA_ENABLED=${IMA_ENABLED:-false}
+  - IMA_API_KEY=${IMA_API_KEY:-}
+  - IMA_CLIENT_ID=${IMA_CLIENT_ID:-}
+  - IMA_KNOWLEDGE_BASE_ID=${IMA_KNOWLEDGE_BASE_ID:-}
+  - IMA_SYNC_INTERVAL_HOURS=${IMA_SYNC_INTERVAL_HOURS:-12}
+```
+
+Dockerfile 新增 Node.js 20（运行 `ima_api.cjs`）。
+
+#### 验证结果
+
+```
+✅ 保存到「女儿/数学」→ [daughter][数学] 因式分解 - e2e-001
+✅ 保存到「儿子/语文」→ [son][语文] 成语运用 - e2e-002
+✅ 自动查找文件夹并归类
+✅ 主备切换（IMA 不可用时降级到本地文件）
+```
+
+#### 已知限制
+
+- IMA API **不支持创建知识库和文件夹**，需在客户端手动创建
+- IMA API **不支持删除笔记**，测试笔记需手动清理
+- IMA API **不支持图片上传**（`upload_image` 返回 None），图片仍存本地
+- 分页只取第一页（20 条），大量数据需要完善 cursor 分页
