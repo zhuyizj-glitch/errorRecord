@@ -1,11 +1,18 @@
 """错题集后端 - FastAPI 入口"""
 
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.services.scheduler import start_scheduler, stop_scheduler
+
+# 配置日志输出
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 
 
 @asynccontextmanager

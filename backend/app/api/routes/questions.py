@@ -109,9 +109,19 @@ async def create_question(q: QuestionCreate):
         body_parts.append(f"\n## 家长备注\n\n{q.parent_note}\n")
 
     body = "\n".join(body_parts)
-    file_path = file_ops.save_question(question_id, q.child, q.subject, frontmatter, body)
 
-    return {"success": True, "id": question_id, "file": str(file_path)}
+    # 通过存储管理器保存（IMA 主存储 + 本地文件降级）
+    from app.services.storage_manager import get_storage_manager
+    storage = get_storage_manager()
+    storage_id = await storage.save_question(
+        question_id=question_id,
+        child=q.child,
+        subject=q.subject,
+        frontmatter=frontmatter,
+        body=body,
+    )
+
+    return {"success": True, "id": question_id, "file": str(storage_id)}
 
 
 @router.get("/questions")

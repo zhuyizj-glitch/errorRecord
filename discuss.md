@@ -1823,3 +1823,193 @@ Dockerfile 新增 Node.js 20（运行 `ima_api.cjs`）。
 - IMA API **不支持删除笔记**，测试笔记需手动清理
 - IMA API **不支持图片上传**（`upload_image` 返回 None），图片仍存本地
 - 分页只取第一页（20 条），大量数据需要完善 cursor 分页
+
+### 8.24 IMA 集成的落地修复与优化
+
+> 日期：2026-09-07 ~ 09-08
+
+8.23 节建好了存储抽象层，但实际测试暴露出三个问题，本节记录修复过程。
+
+#### 问题 1：API 路由没接存储管理器
+
+**现象：** 前端保存成功（HTTP 200），但 IMA 知识库里什么都没有。
+
+**根因：** 存储抽象层（`StorageManager`）建好了，但 `api/routes/questions.py` 里的所有操作仍在直接调 `file_ops.*`，`StorageManager` 完全没被使用。
+
+```python
+# 修复前
+file_path = file_ops.save_question(question_id, q.child, q.subject, frontmatter, body)
+
+# 修复后
+storage = get_storage_manager()
+storage_id = await storage.save_question(
+    question_id=question_id, child=q.child, subject=q.subject,
+    frontmatter=frontmatter, body=body,
+)
+```
+
+**教训：** 建了抽象层要记得把调用方切过去，否则等于没建。
+
+#### 问题 2：主备策略应该是双写，不是降级
+
+**原设计：** 主存储失败才降级到备用（try-except-fallback）。
+
+**问题：** IMA 成功时本地不写，但读取链路（`list_questions` 等）还在读本地文件 → 保存成功但列表看不到。
+
+**改为双写：**
+
+```python
+async def save_question(self, *args, **kwargs) -> str:
+    primary_id, fallback_id, primary_err = None, None, None
+
+    try:
+        primary_id = await self.primary.save_question(*args, **kwargs)
+    except Exception as e:
+        primary_err = e
+
+    if self.fallback:
+        try:
+            fallback_id = await self.fallback.save_question(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"备用存储写入失败: {e}")
+
+    if primary_id is None and fallback_id is None:
+        raise primary_err or Exception("所有存储后端写入失败")
+
+    # 返回本地路径供现有读取链路使用
+    return fallback_id or primary_id
+```
+
+**好处：**
+- IMA 挂了不丢数据（本地兜住）
+- 读取链路不用改（本地始终有文件）
+- Obsidian 里立即可见，不用等定时同步
+
+#### 问题 3：只读挂载导致 IMA 写入失败
+
+**现象：**
+```
+EROFS: read-only file system, open '/root/.config/ima/last_update_check'
+```
+
+**根因：** 凭证目录挂成 `:ro`（出于安全考虑），但 `ima_api.cjs` 每天首次调用要写 `last_update_check` 时间戳做版本检查，写不进去就直接报错退出。
+
+**修复：** 用 `lastCheckFile` 选项把时间戳重定向到容器可写目录，凭证目录保持只读。
+
+```python
+opts = json.dumps({
+    "clientId": client_id,
+    "apiKey": api_key,
+    "lastCheckFile": "/tmp/ima_last_update_check",  # 重定向
+})
+```
+
+同时在 `docker-compose.yml` 加了环境变量 `IMA_LAST_CHECK_FILE=/tmp/ima_last_update_check` 作为双保险。
+
+**这个 bug 是双写策略救回来的** — IMA 写失败，本地写成功，数据没丢，只是没进云端。
+
+#### 优化 1：日志输出
+
+之前 `logger.info/error` 全部不输出（没配 handler），排查全靠猜。加上：
+
+```python
+# main.py
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+```
+
+现在保存时能看到完整链路：
+```
+IMA 笔记创建成功: 7502879434766300
+笔记已添加到知识库, media_id=note_8d8b...
+错题已保存到 IMA 知识库 [儿子/数学]
+错题已保存到文件: /vault/son/数学/2026-09-08-404b4e7f.md
+双写成功: IMA=7502879434766300, File=/vault/...
+```
+
+#### 优化 2：笔记标题可读性
+
+**问题：** IMA 里笔记标题显示为 `id: 9f4e249e`，完全看不出是什么题。
+
+**根因：** IMA **忽略 API 传的 `title` 参数**，自己从 Markdown 内容里提取标题 — 而内容开头是 frontmatter，第一行就是 `id: xxx`。
+
+**修复：** 把标题作为 H1 放在内容最前面：
+
+```python
+def _build_note_content(self, frontmatter, body, title=None):
+    """
+    结构：
+        # 【女儿·英语】现在完成时（概念不清） 2026-09-08   ← IMA 从这里提取
+        ---
+        frontmatter (YAML)
+        ---
+        正文
+    """
+    fm_yaml = yaml.dump(frontmatter, allow_unicode=True, sort_keys=False)
+    parts = []
+    if title:
+        parts.append(f"# {title}\n")
+    parts.append(f"---\n{fm_yaml}---\n")
+    parts.append(body)
+    return "\n".join(parts)
+```
+
+解析时把 H1 剥掉，避免污染 body：
+
+```python
+content = re.sub(r"^#\s+.+?\n+", "", content, count=1)
+```
+
+**标题格式：** `【女儿·英语】现在完成时（概念不清） 2026-09-08`
+
+抽成 `_build_title()` 方法，创建和更新共用。用中文名 + 全角括号在 IMA 列表里更易读，日期放最后便于排序。
+
+**效果对比：**
+
+| 修复前 | 修复后 |
+|---|---|
+| `id: 9f4e249e` | `【儿子·数学】分数除法（概念不清） 2026-09-05` |
+| `id: 8c7fc31d` | `【女儿·英语】现在完成时（概念不清） 2026-09-08` |
+
+#### 新增：反向同步脚本
+
+**用途：** 补齐 IMA 中缺失的错题（如 IMA 写入失败时只存了本地的那些）。
+
+**文件：** `backend/scripts/sync_local_to_ima.py`
+
+```bash
+# 预演（推荐先跑）
+docker exec mistakes-backend python3 scripts/sync_local_to_ima.py --dry-run
+
+# 实际执行
+docker exec mistakes-backend python3 scripts/sync_local_to_ima.py
+```
+
+**设计要点：**
+
+| 特性 | 实现 |
+|---|---|
+| 幂等 | 对比 frontmatter 里的业务 `id`，已存在则跳过 |
+| 预演模式 | `--dry-run` 只列出会同步什么，不实际写入 |
+| 多格式兼容 | 支持 3 种历史标题格式的 ID 提取（`id: xxx`、`... - xxx`、新格式读 frontmatter） |
+| 逐条容错 | 单条失败不中断，最后汇总成功/失败数 |
+
+**首次运行结果：** 检测到 5 条缺失（都在儿子/数学），全部同步成功。再次运行显示「无需同步」，幂等性验证通过。
+
+#### 验证结果
+
+```
+✅ 双写成功（IMA + 本地）
+✅ 自动归类到 知识库 > 孩子 > 学科
+✅ 标题可读（【女儿·英语】现在完成时（概念不清） 2026-09-08）
+✅ frontmatter 解析完整（H1 被正确剥离）
+✅ 反向同步幂等
+✅ IMA 失败时本地兜底
+```
+
+#### 补充的已知限制
+
+- **分页只取第一页**（20 条）：`list_notes` 和同步逻辑都没实现 cursor 分页，错题超过 20 条后同步会漏。需要完善。
+- IMA API 不支持删除笔记，测试笔记需在客户端手动清理

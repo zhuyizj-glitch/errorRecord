@@ -18,14 +18,54 @@ class IMAStorageBackend:
     def __init__(self):
         self.client = get_ima_client()
 
-    def _build_note_content(self, frontmatter: dict, body: str) -> str:
-        """构建笔记内容（frontmatter + body）"""
+    def _build_title(self, child: str, subject: str, frontmatter: dict) -> str:
+        """
+        生成笔记标题
+
+        格式：【女儿·数学】一元二次方程（计算错误） 2026-09-08
+
+        用中文名和全角括号，在 IMA 列表里更易读；日期放最后便于排序。
+        """
+        child_name = "女儿" if child == "daughter" else "儿子"
+        topic = frontmatter.get("topic", "未命名")
+        error_type = frontmatter.get("error_type", "")
+        error_date = frontmatter.get("error_date", "")
+
+        parts = [f"【{child_name}·{subject}】{topic}"]
+        if error_type:
+            parts.append(f"（{error_type}）")
+        if error_date:
+            parts.append(f" {error_date}")
+        return "".join(parts)
+
+    def _build_note_content(self, frontmatter: dict, body: str, title: str = None) -> str:
+        """
+        构建笔记内容
+
+        IMA 会从 Markdown 内容里自动提取标题（忽略 API 传的 title 参数），
+        所以把标题作为 H1 放在最前面，让 IMA 提取到有意义的标题。
+
+        结构：
+            # [孩子][学科] 主题 - ID     ← IMA 从这里提取标题
+            ---
+            frontmatter (YAML)
+            ---
+            正文
+        """
         fm_yaml = yaml.dump(frontmatter, allow_unicode=True, default_flow_style=False, sort_keys=False)
-        return f"---\n{fm_yaml}---\n\n{body}"
+        parts = []
+        if title:
+            parts.append(f"# {title}\n")
+        parts.append(f"---\n{fm_yaml}---\n")
+        parts.append(body)
+        return "\n".join(parts)
 
     def _parse_note_content(self, content: str) -> tuple[dict, str]:
         """解析笔记内容，提取 frontmatter 和 body"""
         import re
+
+        # 先剥掉开头的 H1 标题行（我们自己加的，IMA 用它做标题）
+        content = re.sub(r"^#\s+.+?\n+", "", content, count=1)
 
         # 尝试多种 frontmatter 格式
         # 格式 1: 标准 YAML frontmatter (---)
@@ -93,11 +133,12 @@ class IMAStorageBackend:
             if image_urls:
                 frontmatter["image_urls"] = image_urls
 
-            # 构建笔记内容
-            content = self._build_note_content(frontmatter, body)
-
             # 生成标题
-            title = f"[{child}][{subject}] {frontmatter.get('topic', '未命名')} - {question_id}"
+            child_name = "女儿" if child == "daughter" else "儿子"
+            title = self._build_title(child, subject, frontmatter)
+
+            # 构建笔记内容（标题作为 H1 放最前面，IMA 会提取它）
+            content = self._build_note_content(frontmatter, body, title=title)
 
             # 创建笔记
             note_id = await self.client.create_note(
@@ -113,7 +154,6 @@ class IMAStorageBackend:
             knowledge_base_id = settings.ima_knowledge_base_id
             if knowledge_base_id:
                 # 查找 孩子/学科 对应的文件夹
-                child_name = "女儿" if child == "daughter" else "儿子"
                 folder_id = await self.client.find_folder_by_path(
                     knowledge_base_id, [child_name, subject]
                 )
@@ -229,11 +269,15 @@ class IMAStorageBackend:
                 existing = await self.read_question(storage_id)
                 body = existing.get("_body", "")
 
-            # 构建新内容
-            content = self._build_note_content(frontmatter, body)
-
             # 生成标题
-            title = f"[{frontmatter.get('child')}][{frontmatter.get('subject')}] {frontmatter.get('topic', '未命名')} - {frontmatter.get('id')}"
+            title = self._build_title(
+                frontmatter.get("child", ""),
+                frontmatter.get("subject", ""),
+                frontmatter,
+            )
+
+            # 构建新内容（标题作为 H1 放最前面）
+            content = self._build_note_content(frontmatter, body, title=title)
 
             # 更新笔记
             success = await self.client.update_note(

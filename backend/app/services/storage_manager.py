@@ -31,21 +31,46 @@ class StorageManager:
             logger.info("存储模式: File (仅本地)")
 
     async def save_question(self, *args, **kwargs) -> str:
-        """保存错题（主备策略）"""
+        """
+        保存错题（双写策略）
+
+        IMA 模式下同时写入 IMA 和本地文件：
+        - IMA 作为主存储（云端，稳定）
+        - 本地文件保证读取链路可用（Obsidian 直接可见）
+
+        任一失败不影响另一个，只要有一个成功就算成功。
+        """
+        primary_id = None
+        fallback_id = None
+        primary_err = None
+
+        # 写主存储
         try:
-            result = await self.primary.save_question(*args, **kwargs)
-            return result
+            primary_id = await self.primary.save_question(*args, **kwargs)
         except Exception as e:
-            if self.fallback:
-                logger.warning(f"主存储失败，切换到备用存储: {e}")
-                try:
-                    result = await self.fallback.save_question(*args, **kwargs)
-                    return result
-                except Exception as e2:
-                    logger.error(f"备用存储也失败: {e2}")
-                    raise
-            else:
-                raise
+            primary_err = e
+            logger.error(f"主存储写入失败: {e}")
+
+        # 写备用存储（双写，不是降级）
+        if self.fallback:
+            try:
+                fallback_id = await self.fallback.save_question(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"备用存储写入失败: {e}")
+
+        # 两个都失败才抛错
+        if primary_id is None and fallback_id is None:
+            raise primary_err or Exception("所有存储后端写入失败")
+
+        if primary_id and fallback_id:
+            logger.info(f"双写成功: IMA={primary_id}, File={fallback_id}")
+        elif primary_id:
+            logger.warning(f"仅主存储成功: {primary_id}")
+        else:
+            logger.warning(f"仅备用存储成功: {fallback_id}")
+
+        # 返回本地路径（供现有读取链路使用），没有则返回主存储 ID
+        return fallback_id or primary_id
 
     async def list_questions(self, *args, **kwargs) -> list[dict]:
         """列出错题（主备策略）"""

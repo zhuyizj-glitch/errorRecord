@@ -9,7 +9,7 @@ services:
       - ${VAULT_PATH}:/vault
       # 持久化配置（LLM 设置等）
       - ./config:/app/config
-      # IMA 凭证
+      # IMA 凭证（只读 — 安全）
       - ~/.config/ima:/root/.config/ima:ro
       # ima-skills skill
       - ~/.claude/skills/@tencent-adm/ima-skills:/root/.claude/skills/@tencent-adm/ima-skills:ro
@@ -23,4 +23,6 @@ services:
       - IMA_CLIENT_ID=${IMA_CLIENT_ID:-}
       - IMA_KNOWLEDGE_BASE_ID=${IMA_KNOWLEDGE_BASE_ID:-}
       - IMA_SYNC_INTERVAL_HOURS=${IMA_SYNC_INTERVAL_HOURS:-12}
+      # ima_api.cjs 的更新检查时间戳写入位置（凭证目录是只读的）
+      - IMA_LAST_CHECK_FILE=/tmp/ima_last_update_check
     restart: unless-stopped

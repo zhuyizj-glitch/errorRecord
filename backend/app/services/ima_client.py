@@ -33,7 +33,12 @@ class IMAClient:
         """调用 IMA API"""
         try:
             client_id, api_key = self._get_credentials()
-            opts = json.dumps({"clientId": client_id, "apiKey": api_key})
+            # 凭证 + 更新检查时间戳位置（凭证目录只读，需重定向到可写路径）
+            opts = json.dumps({
+                "clientId": client_id,
+                "apiKey": api_key,
+                "lastCheckFile": "/tmp/ima_last_update_check",
+            })
 
             # 调用 ima_api.cjs 脚本
             proc = await asyncio.create_subprocess_exec(
