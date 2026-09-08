@@ -1,5 +1,6 @@
 """IMA 存储后端 - 基于腾讯 IMA 云存储"""
 
+import json
 import logging
 import yaml
 from typing import Optional
@@ -42,73 +43,165 @@ class IMAStorageBackend:
         """
         构建笔记内容
 
-        IMA 会从 Markdown 内容里自动提取标题（忽略 API 传的 title 参数），
-        所以把标题作为 H1 放在最前面，让 IMA 提取到有意义的标题。
+        两个 IMA 特性决定了这个结构：
+
+        1. IMA 忽略 API 传的 title，自己从内容里提取 → 标题作为 H1 放最前面
+        2. IMA 会重写 Markdown：`_` 转义成 `\\_`、列表 `-` 变 `*`、字段间插空行、
+           多行字符串被拆断。YAML frontmatter 在这种改写下必然解析失败，
+           所以元数据用 ```json 代码块包裹 —— 代码块内容 IMA 不会动。
 
         结构：
-            # [孩子][学科] 主题 - ID     ← IMA 从这里提取标题
-            ---
-            frontmatter (YAML)
-            ---
+            # 【女儿·数学】一元二次方程（计算错误） 2026-09-08
+            ```json
+            {"id": "...", "child": "...", ...}
+            ```
             正文
         """
-        fm_yaml = yaml.dump(frontmatter, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        meta_json = json.dumps(frontmatter, ensure_ascii=False, indent=2, default=str)
         parts = []
         if title:
             parts.append(f"# {title}\n")
-        parts.append(f"---\n{fm_yaml}---\n")
+        parts.append(f"```json\n{meta_json}\n```\n")
         parts.append(body)
         return "\n".join(parts)
 
     def _parse_note_content(self, content: str) -> tuple[dict, str]:
-        """解析笔记内容，提取 frontmatter 和 body"""
+        """
+        解析笔记内容，提取元数据和正文
+
+        按优先级尝试多种格式，兼容历史数据：
+        1. ```json 代码块（当前格式，最可靠）
+        2. 标准 YAML frontmatter（---）
+        3. IMA 改写后的 YAML（*** + 转义字符 + 空行）
+        """
         import re
 
-        # 先剥掉开头的 H1 标题行（我们自己加的，IMA 用它做标题）
+        # 剥掉开头的 H1 标题（我们自己加的，IMA 用它做标题）
         content = re.sub(r"^#\s+.+?\n+", "", content, count=1)
 
-        # 尝试多种 frontmatter 格式
-        # 格式 1: 标准 YAML frontmatter (---)
+        # 格式 1: ```json 代码块（当前格式）
+        match = re.match(r"^```json\s*\n(.+?)\n```\s*\n?(.*)", content, re.DOTALL)
+        if match:
+            try:
+                meta = json.loads(match.group(1))
+                return meta, match.group(2).strip()
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSON 元数据解析失败: {e}")
+
+        # 格式 2: 标准 YAML frontmatter
         match = re.match(r"^---\n(.+?)\n---\n\n?(.*)", content, re.DOTALL)
         if match:
-            frontmatter = yaml.safe_load(match.group(1)) or {}
-            body = match.group(2)
-            return frontmatter, body
+            try:
+                meta = yaml.safe_load(match.group(1)) or {}
+                return meta, match.group(2)
+            except yaml.YAMLError as e:
+                logger.warning(f"YAML frontmatter 解析失败: {e}")
 
-        # 格式 2: IMA 转换后的格式 (***)
-        match = re.match(r"^\*\*\*\n\n(.+?)\n-+\n\n?(.*)", content, re.DOTALL)
+        # 格式 3: IMA 改写后的 YAML（历史数据）
+        match = re.match(r"^\*\*\*\s*\n(.+?)\n(?:\*\*\*|-{3,})\s*\n?(.*)", content, re.DOTALL)
         if match:
-            # 将 IMA 的转义字符还原
-            fm_text = match.group(1)
-            fm_text = fm_text.replace("\\_", "_")
-            fm_text = fm_text.replace("\\*", "*")
-            frontmatter = yaml.safe_load(fm_text) or {}
-            body = match.group(2)
-            return frontmatter, body
+            meta = self._parse_ima_mangled_yaml(match.group(1))
+            if meta:
+                return meta, match.group(2).strip()
 
-        # 格式 3: 直接包含 YAML 内容
+        # 兜底：内容里直接有 YAML 字段
         if "id:" in content and "child:" in content:
-            # 尝试提取 YAML 部分
-            lines = content.split("\n")
-            yaml_lines = []
-            body_start = 0
-            for i, line in enumerate(lines):
-                if line.startswith("# ") or line.startswith("## "):
-                    body_start = i
-                    break
-                if ":" in line or line.strip() == "":
-                    yaml_lines.append(line)
+            meta = self._parse_ima_mangled_yaml(content)
+            if meta:
+                # 正文从第一个 Markdown 标题开始
+                body_match = re.search(r"^#{1,6}\s+.+$", content, re.MULTILINE)
+                body = content[body_match.start():] if body_match else ""
+                return meta, body
 
-            if yaml_lines:
-                yaml_text = "\n".join(yaml_lines)
-                yaml_text = yaml_text.replace("\\_", "_")
-                yaml_text = yaml_text.replace("\\*", "*")
-                frontmatter = yaml.safe_load(yaml_text) or {}
-                body = "\n".join(lines[body_start:])
-                return frontmatter, body
-
-        # 无法解析，返回空 frontmatter
+        logger.warning("无法解析笔记元数据")
         return {}, content
+
+    def _parse_ima_mangled_yaml(self, text: str) -> dict:
+        """
+        解析被 IMA 改写过的 YAML
+
+        IMA 的改写行为：
+        - 下划线转义：`error_type` → `error\\_type`
+        - 星号转义：`*` → `\\*`
+        - 字段间插入空行
+        - 列表项 `- item` → `* item`
+        - 多行字符串被拆成多个段落（无法完整还原，只能尽力）
+
+        策略：逐行提取 `key: value` 对，忽略无法解析的部分。
+        比整体 yaml.safe_load 更健壮 —— 单个字段坏了不影响其他字段。
+        """
+        import re
+
+        # 还原转义
+        text = text.replace("\\_", "_").replace("\\*", "*")
+
+        meta = {}
+        current_key = None
+        list_items = []
+
+        for line in text.split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            # 列表项（IMA 把 - 变成了 *）
+            if stripped.startswith(("* ", "- ")):
+                if current_key:
+                    list_items.append(stripped[2:].strip())
+                continue
+
+            # key: value
+            kv = re.match(r"^([a-zA-Z_][\w]*)\s*:\s*(.*)$", stripped)
+            if kv:
+                # 先收尾上一个列表字段
+                if current_key and list_items:
+                    meta[current_key] = list_items
+                    list_items = []
+
+                key, raw_value = kv.group(1), kv.group(2).strip()
+                current_key = key
+
+                if not raw_value:
+                    # 可能是列表或嵌套结构的开头
+                    continue
+
+                meta[key] = self._coerce_yaml_scalar(raw_value)
+                current_key = None
+            # 其他行（多行字符串的续行等）直接丢弃
+
+        # 收尾
+        if current_key and list_items:
+            meta[current_key] = list_items
+
+        return meta
+
+    @staticmethod
+    def _coerce_yaml_scalar(raw: str):
+        """把 YAML 标量字符串转成 Python 值"""
+        # 去引号
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":
+            return raw[1:-1]
+
+        # 布尔
+        low = raw.lower()
+        if low in ("true", "yes"):
+            return True
+        if low in ("false", "no"):
+            return False
+        if low in ("null", "~", ""):
+            return None
+
+        # 数字
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+
+        return raw
 
     async def save_question(
         self,
@@ -183,36 +276,26 @@ class IMAStorageBackend:
         child: str,
         subject: Optional[str] = None,
     ) -> list[dict]:
-        """列出 IMA 中的错题"""
+        """
+        列出 IMA 中的错题
+
+        注意：需要逐条读取笔记内容才能拿到 frontmatter 做过滤，
+        所以这个操作的请求数与笔记总数成正比，较慢。
+        """
         try:
-            # 分页获取所有笔记（IMA API 限制每次最多 20 条）
-            all_notes = []
-            cursor = ""
-            max_pages = 50  # 最多获取 50 页（1000 条笔记）
-
-            for page in range(max_pages):
-                notes_page = await self.client.list_notes(limit=20, offset=0, folder_id=None)
-                if not notes_page:
-                    break
-
-                all_notes.extend(notes_page)
-
-                # 检查是否还有更多（这里简化处理，假设获取到小于 20 条就结束了）
-                if len(notes_page) < 20:
-                    break
-
-                # 实际应该从返回数据中获取下一个 cursor，但当前 API 返回结构不支持
-                # 暂时用简单的方式：如果获取到 20 条，继续获取下一页
-                # 注意：这会导致重复获取，但暂时这样处理
-                break  # 暂时只获取第一页，后续优化
-
+            # 取全部笔记（自动分页）
+            all_notes = await self.client.list_notes()
             if not all_notes:
                 return []
 
             results = []
             for note in all_notes:
+                note_id = note.get("id")
+                if not note_id:
+                    continue
+
                 # 获取笔记完整内容
-                note_content = await self.client.get_note(note.get("id"))
+                note_content = await self.client.get_note(note_id)
                 if not note_content:
                     continue
 
@@ -226,10 +309,11 @@ class IMAStorageBackend:
                     continue
 
                 # 添加存储 ID
-                frontmatter["_storage_id"] = note.get("id")
-                frontmatter["_file"] = note.get("id")  # 兼容现有代码
+                frontmatter["_storage_id"] = note_id
+                frontmatter["_file"] = note_id  # 兼容现有代码
                 results.append(frontmatter)
 
+            logger.info(f"IMA 错题列表: {child}/{subject or '全部'} → {len(results)} 条")
             return results
 
         except Exception as e:
@@ -351,63 +435,94 @@ class IMAStorageBackend:
             return stats
 
     async def sync_to_obsidian(self, file_storage: StorageBackend) -> dict:
-        """从 IMA 同步到 Obsidian（本地文件）"""
-        stats = {"created": 0, "updated": 0, "deleted": 0, "errors": 0}
+        """
+        从 IMA 同步到 Obsidian（本地文件）
+
+        遍历 IMA 所有笔记（自动分页），解析出错题后写入本地。
+        本地已存在的更新，不存在的新建。
+        """
+        stats = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
 
         try:
-            # 获取 IMA 中的所有错题
-            ima_questions = await self.list_questions("", None)
+            # 取全部笔记（自动分页）
+            all_notes = await self.client.list_notes()
+            if not all_notes:
+                logger.info("IMA 中没有笔记，跳过同步")
+                return stats
 
-            for q in ima_questions:
-                storage_id = q.get("_storage_id")
-                if not storage_id:
+            # 本地已有错题的缓存：{(child, subject): {id: file_path}}
+            local_cache: dict[tuple, dict] = {}
+
+            for note in all_notes:
+                note_id = note.get("id")
+                if not note_id:
                     continue
 
                 try:
-                    # 读取完整数据
-                    full_data = await self.read_question(storage_id)
-                    body = full_data.pop("_body", "")
-                    full_data.pop("_file", None)
-                    full_data.pop("_storage_id", None)
-
-                    child = full_data.get("child")
-                    subject = full_data.get("subject")
-                    question_id = full_data.get("id")
-
-                    if not all([child, subject, question_id]):
+                    # 读取笔记内容并解析
+                    note_content = await self.client.get_note(note_id)
+                    if not note_content:
                         continue
 
-                    # 检查本地是否已存在
-                    local_questions = await file_storage.list_questions(child, subject)
-                    local_ids = {q.get("id") for q in local_questions}
+                    frontmatter, body = self._parse_note_content(
+                        note_content.get("content", "")
+                    )
 
-                    if question_id not in local_ids:
-                        # 创建新文件
-                        await file_storage.save_question(
+                    child = frontmatter.get("child")
+                    subject = frontmatter.get("subject")
+                    question_id = frontmatter.get("id")
+
+                    # 不是错题笔记（缺少必要字段），跳过
+                    if not all([child, subject, question_id]):
+                        stats["skipped"] += 1
+                        continue
+
+                    # 清理内部字段
+                    clean_fm = {
+                        k: v for k, v in frontmatter.items()
+                        if not k.startswith("_")
+                    }
+
+                    # 查本地（带缓存，避免重复扫目录）
+                    cache_key = (child, subject)
+                    if cache_key not in local_cache:
+                        local_list = await file_storage.list_questions(child, subject)
+                        local_cache[cache_key] = {
+                            q.get("id"): q.get("_file")
+                            for q in local_list
+                            if q.get("id")
+                        }
+
+                    local_file = local_cache[cache_key].get(question_id)
+
+                    if local_file:
+                        # 更新现有文件
+                        await file_storage.update_question(
+                            storage_id=local_file,
+                            frontmatter=clean_fm,
+                            body=body,
+                        )
+                        stats["updated"] += 1
+                    else:
+                        # 新建
+                        new_path = await file_storage.save_question(
                             question_id=question_id,
                             child=child,
                             subject=subject,
-                            frontmatter=full_data,
+                            frontmatter=clean_fm,
                             body=body,
                         )
+                        local_cache[cache_key][question_id] = new_path
                         stats["created"] += 1
-                    else:
-                        # 更新现有文件
-                        local_q = next((q for q in local_questions if q.get("id") == question_id), None)
-                        if local_q and local_q.get("_file"):
-                            await file_storage.update_question(
-                                storage_id=local_q["_file"],
-                                frontmatter=full_data,
-                                body=body,
-                            )
-                            stats["updated"] += 1
 
                 except Exception as e:
-                    logger.error(f"同步错题 {storage_id} 失败: {e}")
+                    logger.error(f"同步笔记 {note_id} 失败: {e}")
                     stats["errors"] += 1
+
+            logger.info(f"IMA → Obsidian 同步完成: {stats}")
+            return stats
 
         except Exception as e:
             logger.error(f"同步过程出错: {e}")
-
-        logger.info(f"IMA → Obsidian 同步完成: {stats}")
-        return stats
+            stats["errors"] += 1
+            return stats

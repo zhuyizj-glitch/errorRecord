@@ -73,7 +73,7 @@ async def collect_ima_question_ids(client) -> set[str]:
     from app.services.ima_storage import IMAStorageBackend
 
     existing = set()
-    notes = await client.list_notes(limit=20)
+    notes = await client.list_notes()  # 取全部（自动分页）
     if not notes:
         return existing
 

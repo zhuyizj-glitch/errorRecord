@@ -186,6 +186,71 @@ class IMAClient:
             logger.error(f"添加笔记到知识库失败: {e}")
             return False
 
+    # IMA API 单页上限
+    PAGE_SIZE = 20
+    # 分页遍历的安全上限（防止 API 异常导致无限循环）
+    MAX_PAGES = 100
+
+    async def _paginate(
+        self,
+        endpoint: str,
+        base_payload: dict,
+        list_field: str,
+        max_items: int = None,
+    ) -> list[dict]:
+        """
+        分页遍历 IMA API，返回全部结果
+
+        IMA 的分页机制（实测）：
+        - cursor 传数字字符串表示偏移量（"0" / "20" / "40" ...）
+        - 响应的 is_end 标记是否到底
+        - 不返回 next_cursor 字段，需自己累加偏移
+
+        Args:
+            endpoint: API 端点
+            base_payload: 基础请求参数（不含 cursor/limit）
+            list_field: 响应中列表字段名，如 "note_book_list"
+            max_items: 最多取多少条，None 表示全部
+
+        Returns:
+            合并后的完整列表
+        """
+        all_items = []
+        offset = 0
+
+        for page in range(self.MAX_PAGES):
+            payload = {
+                **base_payload,
+                "cursor": "" if offset == 0 else str(offset),
+                "limit": self.PAGE_SIZE,
+            }
+
+            data = await self._call_api(endpoint, payload)
+            items = data.get(list_field, []) or []
+            all_items.extend(items)
+
+            # 到底了
+            if data.get("is_end"):
+                break
+
+            # 本页没数据也停（防御 is_end 不可靠的情况）
+            if not items:
+                break
+
+            # 够了
+            if max_items and len(all_items) >= max_items:
+                all_items = all_items[:max_items]
+                break
+
+            offset += len(items)
+        else:
+            logger.warning(
+                f"{endpoint} 分页达到安全上限 {self.MAX_PAGES} 页"
+                f"（{self.MAX_PAGES * self.PAGE_SIZE} 条），可能未取完"
+            )
+
+        return all_items
+
     async def find_folder_by_path(
         self,
         knowledge_base_id: str,
@@ -205,16 +270,16 @@ class IMAClient:
             current_folder_id = None
 
             for part in path_parts:
-                payload = {
-                    "knowledge_base_id": knowledge_base_id,
-                    "cursor": "",
-                    "limit": 50,
-                }
+                base_payload = {"knowledge_base_id": knowledge_base_id}
                 if current_folder_id:
-                    payload["folder_id"] = current_folder_id
+                    base_payload["folder_id"] = current_folder_id
 
-                data = await self._call_api("openapi/wiki/v1/get_knowledge_list", payload)
-                items = data.get("knowledge_list", [])
+                # 分页遍历，避免文件夹多时漏掉
+                items = await self._paginate(
+                    endpoint="openapi/wiki/v1/get_knowledge_list",
+                    base_payload=base_payload,
+                    list_field="knowledge_list",
+                )
 
                 found = None
                 for item in items:
@@ -235,37 +300,79 @@ class IMAClient:
             logger.error(f"查找文件夹失败: {e}")
             return None
 
-    async def list_notes(self, limit: int = 20, offset: int = 0, folder_id: str = None) -> Optional[list[dict]]:
+    async def list_knowledge_items(
+        self,
+        knowledge_base_id: str,
+        folder_id: str = None,
+    ) -> list[dict]:
         """
-        列出笔记
+        列出知识库内容（自动分页，取全部）
 
         Args:
-            limit: 返回数量限制（最大 20）
-            offset: 偏移量
+            knowledge_base_id: 知识库 ID
+            folder_id: 文件夹 ID（可选，省略则列根目录）
+
+        Returns:
+            内容列表
+        """
+        try:
+            base_payload = {"knowledge_base_id": knowledge_base_id}
+            if folder_id:
+                base_payload["folder_id"] = folder_id
+
+            items = await self._paginate(
+                endpoint="openapi/wiki/v1/get_knowledge_list",
+                base_payload=base_payload,
+                list_field="knowledge_list",
+            )
+            logger.info(f"知识库内容获取成功: {len(items)} 条")
+            return items
+
+        except Exception as e:
+            logger.error(f"知识库内容获取失败: {e}")
+            return []
+
+    async def list_notes(
+        self,
+        limit: int = None,
+        offset: int = 0,
+        folder_id: str = None,
+    ) -> Optional[list[dict]]:
+        """
+        列出笔记（自动分页，取全部）
+
+        Args:
+            limit: 最多返回多少条，None 表示取全部（自动翻页）
+            offset: 起始偏移量（默认 0）
             folder_id: 文件夹 ID（可选）
 
         Returns:
             笔记列表，失败返回 None
         """
         try:
-            # IMA API 限制 limit 最大为 20
-            limit = min(limit, 20)
-
-            # 使用 cursor 代替 offset 进行分页
-            cursor = "" if offset == 0 else str(offset)
-            payload = {
-                "cursor": cursor,
-                "limit": limit,
-            }
-
+            base_payload = {}
             if folder_id:
-                payload["folder_id"] = folder_id
+                base_payload["folder_id"] = folder_id
 
-            data = await self._call_api("openapi/note/v1/list_note_by_folder_id", payload)
+            # 单页就够时走快路径，避免多余请求
+            if limit and limit <= self.PAGE_SIZE and offset == 0:
+                payload = {**base_payload, "cursor": "", "limit": limit}
+                data = await self._call_api(
+                    "openapi/note/v1/list_note_by_folder_id", payload
+                )
+                raw_items = data.get("note_book_list", []) or []
+            else:
+                raw_items = await self._paginate(
+                    endpoint="openapi/note/v1/list_note_by_folder_id",
+                    base_payload=base_payload,
+                    list_field="note_book_list",
+                    max_items=limit,
+                )
+                if offset:
+                    raw_items = raw_items[offset:]
 
             notes = []
-            note_list = data.get("note_book_list", [])
-            for item in note_list:
+            for item in raw_items:
                 basic_info = item.get("basic_info", {}).get("basic_info", {})
                 notes.append({
                     "id": basic_info.get("docid"),

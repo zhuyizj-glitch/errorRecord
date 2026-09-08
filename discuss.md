@@ -2013,3 +2013,181 @@ docker exec mistakes-backend python3 scripts/sync_local_to_ima.py
 
 - **分页只取第一页**（20 条）：`list_notes` 和同步逻辑都没实现 cursor 分页，错题超过 20 条后同步会漏。需要完善。
 - IMA API 不支持删除笔记，测试笔记需在客户端手动清理
+
+### 8.25 分页机制与元数据格式重构
+
+> 日期：2026-09-08
+
+8.24 节留了个已知限制 —— 分页只取第一页（20 条）。本节彻底解决，过程中还发现了更严重的元数据格式问题。
+
+#### 问题 1：分页缺失
+
+**影响：** IMA 里错题超过 20 条后，列表和同步都会漏掉后面的。
+
+**探测过程：** IMA 文档没写分页机制，写脚本实测三种可能：
+
+| 方式 | 结果 |
+|---|---|
+| 响应的 `next_cursor` 字段 | ❌ API 不返回这个字段 |
+| 用最后一条的 `docid` 作 cursor | ❌ 立即返回 `is_end=True` |
+| **数字偏移量字符串**（`"20"`、`"40"`） | ✅ **可用，无重复** |
+
+响应只有 `is_end` 布尔标记，需要自己累加偏移。
+
+**实现：** 加通用分页方法 `_paginate()`：
+
+```python
+PAGE_SIZE = 20      # IMA 单页上限
+MAX_PAGES = 100     # 安全上限，防 API 异常导致无限循环
+
+async def _paginate(self, endpoint, base_payload, list_field, max_items=None):
+    all_items = []
+    offset = 0
+    for page in range(self.MAX_PAGES):
+        payload = {**base_payload, "cursor": "" if offset == 0 else str(offset),
+                   "limit": self.PAGE_SIZE}
+        data = await self._call_api(endpoint, payload)
+        items = data.get(list_field, []) or []
+        all_items.extend(items)
+
+        if data.get("is_end") or not items:
+            break
+        if max_items and len(all_items) >= max_items:
+            return all_items[:max_items]
+        offset += len(items)
+    else:
+        logger.warning(f"{endpoint} 达到安全上限，可能未取完")
+    return all_items
+```
+
+**应用到三处：**
+- `list_notes()` — 默认取全部，`limit ≤ 20` 时走单页快路径省一次请求
+- `find_folder_by_path()` — 原来硬编码 `limit: 50`（超 API 上限），改分页
+- 新增 `list_knowledge_items()` — 知识库内容列表
+
+**验证：** IMA 里有 22 条笔记（> 20 单页上限），`list_notes()` 返回 22 条且无重复。
+
+#### 问题 2：ima_storage 里的假分页
+
+原代码有个更隐蔽的 bug：
+
+```python
+for page in range(max_pages):
+    notes_page = await self.client.list_notes(limit=20, offset=0, folder_id=None)
+    #                                                   ^^^^^^^^ 每次都请求第一页
+    all_notes.extend(notes_page)
+    if len(notes_page) < 20:
+        break
+    break  # ← 无条件 break，循环体只执行一次
+```
+
+写了个看起来像分页的循环，但 `offset` 从不递增，最后还无条件 `break`。改为直接调 `list_notes()`（内部已自动分页）。
+
+#### 问题 3：sync_to_obsidian 传空 child
+
+```python
+ima_questions = await self.list_questions("", None)  # child=""
+```
+
+而 `list_questions` 的过滤逻辑是 `if frontmatter.get("child") != child: continue` —— 传空字符串会过滤掉所有笔记，导致同步结果永远是全 0。
+
+这解释了 8.23 节定时同步日志里的 `{created: 0, updated: 0}` —— 不是"本地已同步"，是根本没同步。
+
+**重写 `sync_to_obsidian`：** 直接遍历笔记，不复用带过滤的 `list_questions`。同时加了本地查询缓存（`{(child, subject): {id: path}}`），避免每条错题都扫一遍目录。
+
+#### 问题 4（意外发现）：YAML 元数据被 IMA 破坏
+
+修好分页后同步跑起来了，但出现 6 个错误：
+
+```
+同步笔记 7502880760147615 失败: while scanning a quoted scalar
+同步笔记 7502880751779764 失败: while parsing a block mapping
+```
+
+**根因：** IMA 会重写 Markdown 内容，对 YAML frontmatter 是致命的：
+
+| IMA 的改写 | 后果 |
+|---|---|
+| `_` → `\_` | 字段名变成 `error\_type` |
+| 列表 `- item` → `* item` | YAML 数组语法失效 |
+| 字段间插入空行 | 结构变松散 |
+| **多行字符串被拆成多个段落** | 引号内字符串断裂 → 解析必然失败 |
+
+前两个能用字符串替换还原，但多行字符串（比如 `error_suggestion` 里的多行学习建议）被拆断后无法可靠恢复。
+
+**方案对比：**
+
+| 方案 | 评估 |
+|---|---|
+| 继续修 YAML 解析 | ❌ 多行字符串信息已丢失，修不回来 |
+| 元数据放笔记标题 | ❌ 长度受限，字段多了放不下 |
+| **JSON 代码块** | ✅ 代码块内容 IMA 不会改写 |
+
+**改为 JSON 代码块：**
+
+```python
+def _build_note_content(self, frontmatter, body, title=None):
+    """
+    结构：
+        # 【女儿·数学】一元二次方程（计算错误） 2026-09-08
+        ```json
+        {"id": "...", "child": "...", "knowledge_points": [...]}
+        ```
+        正文
+    """
+    meta_json = json.dumps(frontmatter, ensure_ascii=False, indent=2, default=str)
+    parts = []
+    if title:
+        parts.append(f"# {title}\n")
+    parts.append(f"```json\n{meta_json}\n```\n")
+    parts.append(body)
+    return "\n".join(parts)
+```
+
+**解析器改为三级兼容：**
+
+1. ```json 代码块（当前格式）
+2. 标准 YAML frontmatter（本地文件格式）
+3. IMA 改写后的 YAML（历史数据）
+
+第三级用了个更健壮的行级解析器 `_parse_ima_mangled_yaml()` —— 逐行提取 `key: value`，单个字段坏了不影响其他字段，比整体 `yaml.safe_load` 容错性强得多。同时做类型推断（`"0"` → `0`、`"false"` → `False`）。
+
+**两边格式各自最优：**
+
+| 存储 | 格式 | 原因 |
+|---|---|---|
+| IMA | JSON 代码块 | 抗 IMA 改写 |
+| 本地 Obsidian | YAML frontmatter | Obsidian/Dataview 原生支持 |
+
+#### 验证结果
+
+**解析器单元测试（三种格式）：**
+```
+[JSON 格式] id=abc123, points=['因式分解', '配方法']  ✅
+[IMA YAML]  redo_count=0 (int), repeat_pattern=False (bool), points=[...]  ✅
+[标准 YAML] id=xyz789, subject=英语  ✅
+```
+
+**分页：** 22 条笔记（> 20 上限）全部取到，无重复
+
+**同步：** `errors: 6 → 0`
+
+```
+修复前: {created: 8, updated: 3, skipped: 5, errors: 6}
+修复后: {created: 0, updated: 18, skipped: 5, errors: 0}
+```
+
+`skipped: 5` 是 IMA 里的非错题笔记（4 条测试笔记 + 1 条使用指南），无元数据，跳过是正确行为。
+
+**端到端：** 保存含数组字段（`knowledge_points`、`tags`）的错题，回读后元数据完整无损。
+
+#### 已解决的限制
+
+~~分页只取第一页（20 条）~~ → 已实现完整分页
+
+#### 仍存在的限制
+
+- IMA API 不支持创建知识库/文件夹（需客户端手动建）
+- IMA API 不支持删除笔记（测试笔记需手动清理）
+- IMA API 不支持图片上传（图片仍存本地）
+- `list_questions` 需逐条读笔记才能过滤，请求数与笔记总数成正比，笔记多时慢
