@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
+from app.db import database
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 # 配置日志输出
@@ -19,6 +20,7 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时
+    database.initialize()
     if settings.ima_enabled:
         start_scheduler()
     yield
@@ -43,8 +45,9 @@ app.add_middleware(
 )
 
 # 注册路由
-from app.api.routes import children, questions, upload, review, settings as settings_routes, stats, tasks, sync
+from app.api.routes import auth, children, questions, upload, review, settings as settings_routes, stats, tasks, sync
 
+app.include_router(auth.router, prefix="/api", tags=["认证"])
 app.include_router(children.router, prefix="/api", tags=["孩子"])
 app.include_router(upload.router, prefix="/api", tags=["上传"])
 app.include_router(questions.router, prefix="/api", tags=["错题"])

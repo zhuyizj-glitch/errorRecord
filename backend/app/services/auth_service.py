@@ -204,3 +204,20 @@ class AuthService:
     def revoke_session(self, token: str) -> None:
         with self.db.transaction() as connection:
             connection.execute("DELETE FROM sessions WHERE id_hash = ?", (_hash_token(token),))
+
+    def revoke_all_sessions(self, account_id: str) -> None:
+        with self.db.transaction() as connection:
+            connection.execute("DELETE FROM sessions WHERE account_id = ?", (account_id,))
+
+    def change_password(self, account_id: str, current_password: str, new_password: str) -> None:
+        account = self.get_account(account_id)
+        if not account or not self.verify_password(account, current_password):
+            raise AuthError("当前密码错误")
+        password_hash, password_salt = self._password_fields(new_password)
+        with self.db.transaction() as connection:
+            connection.execute(
+                "UPDATE accounts SET password_hash = ?, password_salt = ?, "
+                "must_change_password = 0, updated_at = ? WHERE id = ?",
+                (password_hash, password_salt, _iso(self.now()), account_id),
+            )
+            connection.execute("DELETE FROM sessions WHERE account_id = ?", (account_id,))

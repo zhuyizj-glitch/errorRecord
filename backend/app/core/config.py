@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     config_path: str = "/app/config"
     cors_origins: str = "http://localhost:5173"
     database_url_value: str = Field(default="", validation_alias="DATABASE_URL")
+    cookie_secure: bool = False
 
     # IMA 配置
     ima_api_key: str = ""
