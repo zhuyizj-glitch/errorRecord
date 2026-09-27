@@ -1,5 +1,6 @@
 """错题 CRUD 接口"""
 
+import logging
 import uuid
 from datetime import date
 from pathlib import Path
@@ -12,6 +13,9 @@ from app.models.question import QuestionCreate, RedoRequest
 from app.services import file_ops, analyzer, llm
 from app.services.review_scheduler import calculate_next_review
 from app.core.config import settings
+from app.api.routes.upload import TEMP_DIR
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -36,22 +40,18 @@ async def create_question(q: QuestionCreate):
     """保存新错题"""
     question_id = uuid.uuid4().hex[:8]
 
-    # 保存图片到 vault
-    image_paths = []
-    for img_id_info in q.image_ids:
-        # img_id_info 可以是 image_id 字符串或 dict
-        if isinstance(img_id_info, dict):
-            src = Path(img_id_info.get("path", ""))
-            orig_name = img_id_info.get("filename", "image.jpg")
-        else:
-            src = Path(f"/tmp/mistakes_uploads/{img_id_info}.*")
-            orig_name = "image.jpg"
-
-        if src.exists():
-            dest = file_ops.save_image(
-                src.read_bytes(), q.child, q.subject, question_id, orig_name
-            )
-            image_paths.append(dest)
+    # 读取上传的临时图片
+    images: list[tuple[bytes, str]] = []
+    for img in q.image_ids:
+        src = Path(img.path).resolve()
+        if (src.parent != TEMP_DIR.resolve() or src.stem != img.id
+                or not src.is_file() or Path(img.filename).name != img.filename):
+            raise HTTPException(status_code=400, detail="上传图片无效或已过期，请重新上传")
+        try:
+            images.append((src.read_bytes(), img.filename))
+        except Exception as e:
+            logger.error(f"读取临时图片失败 {img.path}: {e}")
+            raise HTTPException(status_code=400, detail="读取上传图片失败，请重新上传") from e
 
     # 构建 frontmatter（新错题初始掌握度为 0）
     mastery_score = 0  # 新错题还没重做过，初始为 0
@@ -87,10 +87,13 @@ async def create_question(q: QuestionCreate):
     }
 
     # 构建 body
+    # 图片引用用相对路径，指向 _assets/{child}/{subject}/{question_id}/{filename}
+    # Markdown 文件在 {child}/{subject}/ 目录下，所以需要 ../../_assets/ 才能到 vault 根目录
     body_parts = ["## 原题\n"]
-    for p in image_paths:
-        rel = p.relative_to(settings.vault / "_assets")
-        body_parts.append(f"![原题](_assets/{rel})\n")
+    for _, filename in images:
+        body_parts.append(
+            f"![原题](../../_assets/{q.child}/{q.subject}/{question_id}/{filename})\n"
+        )
     if q.question_text:
         body_parts.append(f"\n> **题目内容**：{q.question_text}\n")
     body_parts.append(f"\n## 正确答案\n\n{q.correct_answer}\n")
@@ -110,7 +113,7 @@ async def create_question(q: QuestionCreate):
 
     body = "\n".join(body_parts)
 
-    # 通过存储管理器保存（IMA 主存储 + 本地文件降级）
+    # 通过存储管理器保存（IMA + 本地双写，图片一并传入）
     from app.services.storage_manager import get_storage_manager
     storage = get_storage_manager()
     storage_id = await storage.save_question(
@@ -119,9 +122,22 @@ async def create_question(q: QuestionCreate):
         subject=q.subject,
         frontmatter=frontmatter,
         body=body,
+        images=images,
     )
 
-    return {"success": True, "id": question_id, "file": str(storage_id)}
+    # 清理临时文件
+    for img in q.image_ids:
+        try:
+            Path(img.path).unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning(f"清理临时图片失败 {img.path}: {e}")
+
+    return {
+        "success": True,
+        "id": question_id,
+        "file": str(storage_id),
+        "images_saved": len(images),
+    }
 
 
 @router.get("/questions")

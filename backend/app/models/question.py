@@ -63,6 +63,13 @@ class AnalyzeResult(BaseModel):
     confidence: str = "medium"
 
 
+class UploadedImage(BaseModel):
+    """上传接口返回的图片信息"""
+    id: str
+    path: str
+    filename: str
+
+
 class QuestionCreate(BaseModel):
     """创建错题的请求"""
     child: str
@@ -80,7 +87,8 @@ class QuestionCreate(BaseModel):
     parent_note: Optional[str] = None
     knowledge_points: list[str] = []
     tags: list[str] = []
-    image_ids: list[str] = []  # 上传阶段返回的临时图片 ID
+    # 上传阶段返回的图片信息（含临时文件路径）
+    image_ids: list[UploadedImage] = []
 
 
 class RedoRequest(BaseModel):

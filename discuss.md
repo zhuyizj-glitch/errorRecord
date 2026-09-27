@@ -2191,3 +2191,33 @@ def _build_note_content(self, frontmatter, body, title=None):
 - IMA API 不支持删除笔记（测试笔记需手动清理）
 - IMA API 不支持图片上传（图片仍存本地）
 - `list_questions` 需逐条读笔记才能过滤，请求数与笔记总数成正比，笔记多时慢
+
+### 8.26 复习提交与上传图片保存回归验证（2026-09-16）
+
+复习页面此前只把 `result` 放在 URL 查询参数中，后端的 `RedoRequest` 从 JSON body 读取，因此会返回 422。现改为发送 `{ "result": "correct" }` 或 `{ "result": "wrong" }` JSON body。
+
+上传完成后，任务现在保留上传接口返回的图片 ID、临时路径及文件名；保存错题时将其传回后端。后端从上传临时目录读取图片并传给存储层，Obsidian 图片链接使用从孩子/学科笔记目录到 vault `_assets` 的相对路径 `../../_assets/...`，保存成功后清理临时图片。非法或失效的图片路径返回 400，避免静默保存没有图片的错题，也避免读取上传目录以外的文件。
+
+验证：前端 `npm run build` 通过；Python 编译检查通过；容器内接口回归测试覆盖上传、无效路径拒绝、笔记与图片保存、临时图片清理，以及“做对/又错”两次复习提交，均通过。测试使用临时 vault 与本地存储替身，未向 IMA 写入测试题。当前容器已启动，`/api/health` 返回 `ok`。IMA 端不支持图片上传，图片仍存本地 vault。
+
+### 8.27 多账号、邀请码注册与账号级数据隔离设计（2026-09-27）
+
+本期确定增加管理员和普通账号。系统首次启动时创建唯一的初始管理员；普通用户使用管理员在网页后台生成的一次性邀请码，以用户名、显示名称和密码注册。管理员可以查看邀请码状态、作废未使用邀请码，并为用户重置密码。重置后旧会话失效，用户必须先修改临时密码。
+
+账号系统采用 SQLite 与服务端 Cookie 会话。数据库持久化在 `config/app.db`；密码使用 scrypt 加盐哈希，邀请码和会话令牌只保存哈希。LLM 配置全局共享，仅管理员可查看和修改，普通账号只能调用分析功能。
+
+每个账号可以创建多个孩子，并从语文、数学、英语、物理、化学、生物、政治、历史、地理九门课程中选择。孩子和课程第一期只支持新增、改名和调整，不提供删除或归档。错题不删除，根据掌握程度逐步延长复习间隔。
+
+数据采用逻辑隔离：IMA 继续共用一个知识库，但所有错题写入并强制过滤 `account_id`、`child_id`、`child_name`；Obsidian 使用 `accounts/{account_id}/{child_id}/{subject}` 目录，图片使用 `_assets/accounts/...`。后端从登录会话取得账号，不信任前端提交的账号标识，跨账号资源统一返回 404。
+
+现有女儿和儿子及其 Markdown、图片、IMA 元数据全部迁入首次创建的管理员账号。迁移前完整备份，迁移脚本支持 dry-run、异常清单和幂等重跑。完整设计见 `docs/plans/2026-09-27-multi-account-design.md`，实施步骤见 `docs/plans/2026-09-27-multi-account-implementation.md`。
+
+### 8.28 EdgeOne Makers 部署适配评估（2026-09-27）
+
+当前项目不能原样部署到 EdgeOne Makers，但可以经过架构适配后部署。React/Vite 静态前端可以直接部署；EdgeOne Cloud Functions 官方支持 Python 3.10、ASGI 和 FastAPI，因此 API 路由与主要业务逻辑可以迁移。HttpOnly Cookie、账号鉴权和管理员权限模型也符合平台能力。
+
+不兼容项包括：Docker Compose 常驻容器、持久化 SQLite 文件、本地 Obsidian vault、上传图片临时文件、进程内异步任务列表，以及依赖容器内 Node 和全局 `ima-skills` 的 IMA 调用。Cloud Functions 单次请求体上限 6 MB，默认最长 30 秒、可配置到 120 秒，也会限制当前多图上传和长时间 LLM 分析。
+
+如果选择全量 EdgeOne 部署，建议改为：Pages 承载前端；Python Cloud Functions 承载 FastAPI；Neon/PostgreSQL 或腾讯云数据库承载账号和业务元数据；COS 或 EdgeOne Blob 承载图片；任务状态放数据库并使用可恢复的异步执行方式；IMA 改为直接 HTTP OpenAPI 调用。Obsidian 回流改为宿主机定时拉取，而不是云函数直接写本地 vault。
+
+如果保留现有 Docker 后端，EdgeOne 只部署静态前端并反向访问宿主机 API，则改动较小，但宿主机仍需持续在线，且必须处理 HTTPS、跨域和公网入口。综合稳定性与改造成本，近期继续 Docker/Tailscale 最稳；决定正式公网化后，再按全量 EdgeOne 方案改造持久层。

@@ -7,6 +7,13 @@ import AnalysisPreview from '../components/AnalysisPreview'
 import { createQuestion } from '../api/client'
 import type { AnalyzeResult } from '../types'
 
+/** 后端上传接口返回的图片信息 */
+interface UploadedImage {
+  id: string
+  path: string
+  filename: string
+}
+
 interface Task {
   id: string
   child: string
@@ -18,6 +25,8 @@ interface Task {
   completed_at: string | null
   expanded: boolean
   imageFiles: File[]
+  /** 后端返回的图片信息（含临时文件路径），保存错题时要回传给后端 */
+  uploadedImages: UploadedImage[]
   editMode: boolean
   refineFeedback: string
 }
@@ -100,6 +109,7 @@ export default function UploadPage() {
         completed_at: null,
         expanded: true,
         imageFiles: files,
+        uploadedImages: uploadRes.image_ids,
         editMode: false,
         refineFeedback: '',
       }
@@ -130,7 +140,7 @@ export default function UploadPage() {
         error_suggestion: task.result.error_analysis?.suggestion,
         knowledge_points: task.result.metadata.knowledge_points,
         tags: ['错题'],
-        image_ids: task.imageFiles.map(f => f.name),
+        image_ids: task.uploadedImages || [],
       })
       setTasks(prev => prev.filter(t => t.id !== task.id))
     } catch (e: any) {

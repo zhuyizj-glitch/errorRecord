@@ -39,8 +39,12 @@ export default function ReviewPage() {
     setSubmitting(true)
     try {
       const res = await fetch(
-        `/api/questions/${q.id}/redo?child=${currentChild}&subject=${encodeURIComponent(q.subject)}&result=${result}`,
-        { method: 'POST' }
+        `/api/questions/${q.id}/redo?child=${currentChild}&subject=${encodeURIComponent(q.subject)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ result }),
+        }
       ).then(r => r.json())
 
       if (res.success) {
