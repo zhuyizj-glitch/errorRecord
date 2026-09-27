@@ -45,9 +45,10 @@ app.add_middleware(
 )
 
 # 注册路由
-from app.api.routes import auth, children, questions, upload, review, settings as settings_routes, stats, tasks, sync
+from app.api.routes import admin, auth, children, questions, upload, review, settings as settings_routes, stats, tasks, sync
 
 app.include_router(auth.router, prefix="/api", tags=["认证"])
+app.include_router(admin.router, prefix="/api", tags=["管理员"])
 app.include_router(children.router, prefix="/api", tags=["孩子"])
 app.include_router(upload.router, prefix="/api", tags=["上传"])
 app.include_router(questions.router, prefix="/api", tags=["错题"])

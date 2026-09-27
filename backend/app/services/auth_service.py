@@ -221,3 +221,55 @@ class AuthService:
                 (password_hash, password_salt, _iso(self.now()), account_id),
             )
             connection.execute("DELETE FROM sessions WHERE account_id = ?", (account_id,))
+
+    def list_invites(self) -> list[dict]:
+        with self.db.connect() as connection:
+            rows = connection.execute(
+                "SELECT id, created_by, created_at, expires_at, revoked_at, used_by, used_at "
+                "FROM invites ORDER BY created_at DESC"
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            if row["used_at"]:
+                item["status"] = "used"
+            elif row["revoked_at"]:
+                item["status"] = "revoked"
+            elif datetime.fromisoformat(row["expires_at"]) <= self.now():
+                item["status"] = "expired"
+            else:
+                item["status"] = "active"
+            result.append(item)
+        return result
+
+    def list_accounts(self) -> list[dict]:
+        with self.db.connect() as connection:
+            rows = connection.execute(
+                "SELECT id, username, display_name, role, must_change_password, created_at "
+                "FROM accounts ORDER BY created_at"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def reset_password(self, admin_id: str, account_id: str) -> str:
+        temporary_password = secrets.token_urlsafe(12)
+        password_hash, password_salt = self._password_fields(temporary_password)
+        with self.db.transaction() as connection:
+            admin = connection.execute(
+                "SELECT role FROM accounts WHERE id = ?", (admin_id,)
+            ).fetchone()
+            if not admin or admin["role"] != "admin":
+                raise AuthError("仅管理员可以重置密码")
+            target = connection.execute(
+                "SELECT role FROM accounts WHERE id = ?", (account_id,)
+            ).fetchone()
+            if not target:
+                raise AuthError("账号不存在")
+            if account_id == admin_id:
+                raise AuthError("管理员请通过个人设置修改密码")
+            connection.execute(
+                "UPDATE accounts SET password_hash = ?, password_salt = ?, "
+                "must_change_password = 1, updated_at = ? WHERE id = ?",
+                (password_hash, password_salt, _iso(self.now()), account_id),
+            )
+            connection.execute("DELETE FROM sessions WHERE account_id = ?", (account_id,))
+        return temporary_password
