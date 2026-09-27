@@ -36,6 +36,9 @@ npm-debug.log*
 
 # Config with secrets
 config/settings.json
+config/app.db
+config/app.db-shm
+config/app.db-wal
 
 # Claude settings (contains command history with secrets)
 .claude/settings.local.json
