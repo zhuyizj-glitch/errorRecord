@@ -2,6 +2,8 @@
 
 ## 📋 实施进度概览
 
+> 2026-09-27 更新：IMA OpenAPI 已经通过 `@tencent-adm/ima-skills` 接入，下文中“待确认 API 端点”为早期调研记录。当前主线是 IMA 主存储 + Obsidian 备份，并已增加账号级数据隔离。
+
 ### ✅ 已完成（架构和框架）
 
 1. **IMA 客户端基础框架** (`backend/app/services/ima_client.py`)
@@ -52,6 +54,28 @@
 
 10. **依赖更新** (`backend/requirements.txt`)
     - 添加 `apscheduler>=3.10.0,<4.0`
+
+11. **多账号迁移工具** (`backend/scripts/migrate_to_accounts.py`)
+    - 默认 dry-run，只统计不修改数据
+    - 正式执行前自动备份 SQLite、`daughter/son` 目录和旧图片
+    - 将旧 Vault 数据迁入 `accounts/{account_id}/{child_id}/{subject}`
+    - 给 Markdown 和 IMA 笔记补齐 `account_id`/`child_id`/`child_name`
+    - 重复运行不会重复创建孩子或错题
+
+### 多账号迁移流程
+
+1. 在管理员账号初始化后，先运行预演：
+
+   ```bash
+   python scripts/migrate_to_accounts.py \
+     --database-url sqlite:////config/app.db \
+     --vault /vault \
+     --admin-id <管理员账号ID> \
+     --migrate-ima
+   ```
+
+2. 核对预演输出的错题数、图片数和 IMA 匹配数。
+3. 确认无误后增加 `--apply` 正式执行。脚本会返回备份目录，用于回滚和核对。
 
 ---
 
