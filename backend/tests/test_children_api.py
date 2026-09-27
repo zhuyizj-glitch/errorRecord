@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -19,6 +20,9 @@ class ChildrenApiTest(unittest.TestCase):
         self.database = Database(f"sqlite:///{Path(self.temp_dir.name) / 'app.db'}")
         self.database.initialize()
         self.auth = AuthService(self.database)
+        self.vault = Path(self.temp_dir.name) / "vault"
+        self.vault_patch = patch("app.core.config.settings.vault_path", str(self.vault))
+        self.vault_patch.start()
         app.dependency_overrides[get_auth_service] = lambda: self.auth
         self.admin = TestClient(app)
         initialized = self.admin.post("/api/auth/initialize", json={
@@ -33,6 +37,7 @@ class ChildrenApiTest(unittest.TestCase):
 
     def tearDown(self):
         app.dependency_overrides.clear()
+        self.vault_patch.stop()
         self.temp_dir.cleanup()
 
     def test_accounts_only_see_their_own_children(self):
@@ -64,6 +69,11 @@ class ChildrenApiTest(unittest.TestCase):
         created = self.admin.post("/api/children", json={
             "name": "孩子", "emoji": "🧒", "subjects": ["数学", "化学"],
         }).json()
+        account_id = self.admin.get("/api/auth/me").json()["id"]
+        math_dir = self.vault / "accounts" / account_id / created["id"] / "数学"
+        chemistry_dir = self.vault / "accounts" / account_id / created["id"] / "化学"
+        self.assertTrue(math_dir.is_dir())
+        self.assertTrue(chemistry_dir.is_dir())
         updated = self.admin.patch(f"/api/children/{created['id']}", json={
             "name": "孩子", "emoji": "🧒", "subjects": ["数学"],
         })
@@ -76,6 +86,7 @@ class ChildrenApiTest(unittest.TestCase):
                 (created["id"],),
             ).fetchone()
         self.assertEqual(row["enabled"], 0)
+        self.assertTrue(chemistry_dir.is_dir())
 
 
 if __name__ == "__main__":

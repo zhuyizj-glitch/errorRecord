@@ -27,7 +27,7 @@ class IMAStorageBackend:
 
         用中文名和全角括号，在 IMA 列表里更易读；日期放最后便于排序。
         """
-        child_name = "女儿" if child == "daughter" else "儿子"
+        child_name = frontmatter.get("child_name", child)
         topic = frontmatter.get("topic", "未命名")
         error_type = frontmatter.get("error_type", "")
         error_date = frontmatter.get("error_date", "")
@@ -206,7 +206,8 @@ class IMAStorageBackend:
     async def save_question(
         self,
         question_id: str,
-        child: str,
+        account_id: str,
+        child_id: str,
         subject: str,
         frontmatter: dict,
         body: str,
@@ -227,8 +228,8 @@ class IMAStorageBackend:
                 frontmatter["image_urls"] = image_urls
 
             # 生成标题
-            child_name = "女儿" if child == "daughter" else "儿子"
-            title = self._build_title(child, subject, frontmatter)
+            child_name = frontmatter.get("child_name", child_id)
+            title = self._build_title(child_id, subject, frontmatter)
 
             # 构建笔记内容（标题作为 H1 放最前面，IMA 会提取它）
             content = self._build_note_content(frontmatter, body, title=title)
@@ -237,7 +238,7 @@ class IMAStorageBackend:
             note_id = await self.client.create_note(
                 title=title,
                 content=content,
-                tags=[child, subject, frontmatter.get("error_type", ""), question_id],
+                tags=[child_name, subject, frontmatter.get("error_type", ""), question_id],
             )
 
             if not note_id:
@@ -273,7 +274,8 @@ class IMAStorageBackend:
 
     async def list_questions(
         self,
-        child: str,
+        account_id: str,
+        child_id: str,
         subject: Optional[str] = None,
     ) -> list[dict]:
         """
@@ -303,7 +305,9 @@ class IMAStorageBackend:
                 frontmatter, _ = self._parse_note_content(content)
 
                 # 过滤条件
-                if frontmatter.get("child") != child:
+                if frontmatter.get("account_id") != account_id:
+                    continue
+                if frontmatter.get("child_id") != child_id:
                     continue
                 if subject and frontmatter.get("subject") != subject:
                     continue

@@ -9,14 +9,20 @@ from typing import Optional
 from app.core.config import settings
 
 
-def _child_subject_dir(child: str, subject: str) -> Path:
+def _child_subject_dir(account_id: str, child_id: str, subject: str) -> Path:
     """获取孩子某学科的目录"""
-    return settings.vault / child / subject
+    return settings.vault / "accounts" / account_id / child_id / subject
 
 
-def _assets_dir(child: str, subject: str, question_id: str) -> Path:
+def _assets_dir(account_id: str, child_id: str, subject: str, question_id: str) -> Path:
     """获取题目图片存放目录"""
-    return settings.vault / "_assets" / child / subject / question_id
+    return settings.vault / "_assets" / "accounts" / account_id / child_id / subject / question_id
+
+
+def ensure_subject_dir(account_id: str, child_id: str, subject: str) -> Path:
+    directory = _child_subject_dir(account_id, child_id, subject)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 def _generate_filename(question_id: str, error_date: date) -> str:
@@ -32,13 +38,14 @@ def _build_markdown(frontmatter: dict, body: str) -> str:
 
 def save_question(
     question_id: str,
-    child: str,
+    account_id: str,
+    child_id: str,
     subject: str,
     frontmatter: dict,
     body: str,
 ) -> Path:
     """保存错题 markdown 文件"""
-    dir_path = _child_subject_dir(child, subject)
+    dir_path = _child_subject_dir(account_id, child_id, subject)
     dir_path.mkdir(parents=True, exist_ok=True)
 
     filename = _generate_filename(question_id, date.fromisoformat(frontmatter["error_date"]))
@@ -49,19 +56,22 @@ def save_question(
     return file_path
 
 
-def save_image(image_data: bytes, child: str, subject: str, question_id: str, filename: str) -> Path:
+def save_image(
+    image_data: bytes, account_id: str, child_id: str, subject: str,
+    question_id: str, filename: str,
+) -> Path:
     """保存图片到 _assets 目录"""
-    dir_path = _assets_dir(child, subject, question_id)
+    dir_path = _assets_dir(account_id, child_id, subject, question_id)
     dir_path.mkdir(parents=True, exist_ok=True)
     file_path = dir_path / filename
     file_path.write_bytes(image_data)
     return file_path
 
 
-def list_questions(child: str, subject: Optional[str] = None) -> list[dict]:
+def list_questions(account_id: str, child_id: str, subject: Optional[str] = None) -> list[dict]:
     """列出错题（解析 frontmatter）"""
     results = []
-    base = settings.vault / child
+    base = settings.vault / "accounts" / account_id / child_id
     if not base.exists():
         return results
 
@@ -103,14 +113,16 @@ def update_question(file_path: str, frontmatter: dict, body: Optional[str] = Non
     return path
 
 
-def delete_question(file_path: str, child: str, subject: str, question_id: str) -> None:
+def delete_question(
+    file_path: str, account_id: str, child_id: str, subject: str, question_id: str
+) -> None:
     """删除错题文件和对应图片"""
     path = Path(file_path)
     if path.exists():
         path.unlink()
 
     # 删除图片目录
-    assets_dir = _assets_dir(child, subject, question_id)
+    assets_dir = _assets_dir(account_id, child_id, subject, question_id)
     if assets_dir.exists():
         import shutil
         shutil.rmtree(assets_dir)

@@ -9,6 +9,7 @@ from pydantic import BaseModel, field_validator
 from app.api.deps import get_active_account, get_auth_service
 from app.models.auth import Account
 from app.services.auth_service import AuthService
+from app.services import file_ops
 
 
 router = APIRouter()
@@ -85,7 +86,10 @@ def create_child(
             "INSERT INTO child_subjects (child_id, subject, enabled) VALUES (?, ?, 1)",
             [(child_id, subject) for subject in req.subjects],
         )
-        return _read_child(connection, child_id, account.id)
+        result = _read_child(connection, child_id, account.id)
+    for subject in req.subjects:
+        file_ops.ensure_subject_dir(account.id, child_id, subject)
+    return result
 
 
 @router.patch("/children/{child_id}")
@@ -111,4 +115,7 @@ def update_child(
                 "ON CONFLICT(child_id, subject) DO UPDATE SET enabled = 1",
                 (child_id, subject),
             )
-        return _read_child(connection, child_id, account.id)
+        result = _read_child(connection, child_id, account.id)
+    for subject in req.subjects:
+        file_ops.ensure_subject_dir(account.id, child_id, subject)
+    return result

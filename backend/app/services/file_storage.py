@@ -18,7 +18,8 @@ class FileStorageBackend:
     async def save_question(
         self,
         question_id: str,
-        child: str,
+        account_id: str,
+        child_id: str,
         subject: str,
         frontmatter: dict,
         body: str,
@@ -29,10 +30,14 @@ class FileStorageBackend:
             # 保存图片
             if images:
                 for image_data, filename in images:
-                    file_ops.save_image(image_data, child, subject, question_id, filename)
+                    file_ops.save_image(
+                        image_data, account_id, child_id, subject, question_id, filename
+                    )
 
             # 保存 Markdown 文件
-            file_path = file_ops.save_question(question_id, child, subject, frontmatter, body)
+            file_path = file_ops.save_question(
+                question_id, account_id, child_id, subject, frontmatter, body
+            )
             logger.info(f"错题已保存到文件: {file_path}")
             return str(file_path)
 
@@ -42,12 +47,13 @@ class FileStorageBackend:
 
     async def list_questions(
         self,
-        child: str,
+        account_id: str,
+        child_id: str,
         subject: Optional[str] = None,
     ) -> list[dict]:
         """列出本地文件中的错题"""
         try:
-            return file_ops.list_questions(child, subject)
+            return file_ops.list_questions(account_id, child_id, subject)
         except Exception as e:
             logger.error(f"列出错题失败: {e}")
             return []
@@ -78,15 +84,17 @@ class FileStorageBackend:
     async def delete_question(self, storage_id: str) -> bool:
         """删除本地文件中的错题"""
         try:
-            # 从 storage_id 解析出 child, subject, question_id
+            # 路径: /vault/accounts/{account_id}/{child_id}/{subject}/{date-id}.md
             path = Path(storage_id)
-            # 路径格式: /vault/child/subject/date-question_id.md
             subject = path.parent.name
-            child = path.parent.parent.name
+            child_id = path.parent.parent.name
+            account_id = path.parent.parent.parent.name
             filename = path.stem  # date-question_id
             question_id = filename.split("-", 1)[1] if "-" in filename else filename
 
-            file_ops.delete_question(storage_id, child, subject, question_id)
+            file_ops.delete_question(
+                storage_id, account_id, child_id, subject, question_id
+            )
             logger.info(f"错题已删除: {storage_id}")
             return True
         except Exception as e:
@@ -96,15 +104,17 @@ class FileStorageBackend:
     async def get_image_url(self, storage_id: str, filename: str) -> Optional[str]:
         """获取本地图片的访问路径（返回相对路径）"""
         try:
-            # 从 storage_id 解析出 child, subject, question_id
             path = Path(storage_id)
             subject = path.parent.name
-            child = path.parent.parent.name
+            child_id = path.parent.parent.name
             filename_base = path.stem
             question_id = filename_base.split("-", 1)[1] if "-" in filename_base else filename_base
 
             # 返回 API 访问路径
-            return f"/api/questions/{question_id}/images/{filename}?child={child}&subject={subject}"
+            return (
+                f"/api/questions/{question_id}/images/{filename}"
+                f"?child_id={child_id}&subject={subject}"
+            )
         except Exception as e:
             logger.error(f"获取图片 URL 失败: {e}")
             return None

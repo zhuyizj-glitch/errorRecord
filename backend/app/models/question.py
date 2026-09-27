@@ -72,7 +72,7 @@ class UploadedImage(BaseModel):
 
 class QuestionCreate(BaseModel):
     """创建错题的请求"""
-    child: str
+    child_id: str
     subject: str
     topic: str
     error_type: Optional[str] = None

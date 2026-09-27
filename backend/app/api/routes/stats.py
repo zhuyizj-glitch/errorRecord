@@ -2,18 +2,36 @@
 
 from datetime import date, timedelta
 from collections import defaultdict
-from fastapi import APIRouter, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from typing import Optional
 
 from app.services import file_ops
+from app.api.deps import get_active_account, get_auth_service
+from app.models.auth import Account
+from app.services.auth_service import AuthService
 
 router = APIRouter()
 
 
+def _require_child(auth: AuthService, account_id: str, child_id: str):
+    with auth.db.connect() as connection:
+        child = connection.execute(
+            "SELECT 1 FROM children WHERE id = ? AND account_id = ?",
+            (child_id, account_id),
+        ).fetchone()
+    if not child:
+        raise HTTPException(status_code=404, detail="孩子不存在")
+
+
 @router.get("/stats/overview")
-async def get_overview(child: str = Query(...)):
+async def get_overview(
+    child_id: str = Query(...),
+    account: Account = Depends(get_active_account),
+    auth: AuthService = Depends(get_auth_service),
+):
     """获取总览统计"""
-    questions = file_ops.list_questions(child)
+    _require_child(auth, account.id, child_id)
+    questions = file_ops.list_questions(account.id, child_id)
 
     total = len(questions)
     if total == 0:
@@ -75,10 +93,13 @@ async def get_overview(child: str = Query(...)):
 @router.get("/stats/subject/{subject}")
 async def get_subject_stats(
     subject: str = Path(...),
-    child: str = Query(...),
+    child_id: str = Query(...),
+    account: Account = Depends(get_active_account),
+    auth: AuthService = Depends(get_auth_service),
 ):
     """获取某学科详细统计"""
-    questions = file_ops.list_questions(child, subject)
+    _require_child(auth, account.id, child_id)
+    questions = file_ops.list_questions(account.id, child_id, subject)
 
     # 知识点掌握度
     kp_stats = defaultdict(lambda: {"total": 0, "mastered": 0, "avg_score": 0, "scores": []})
@@ -117,11 +138,14 @@ async def get_subject_stats(
 
 @router.get("/stats/weak-points")
 async def get_weak_points(
-    child: str = Query(...),
+    child_id: str = Query(...),
     limit: int = Query(default=10),
+    account: Account = Depends(get_active_account),
+    auth: AuthService = Depends(get_auth_service),
 ):
     """获取薄弱知识点 TOP N"""
-    questions = file_ops.list_questions(child)
+    _require_child(auth, account.id, child_id)
+    questions = file_ops.list_questions(account.id, child_id)
 
     kp_scores = defaultdict(list)
     for q in questions:

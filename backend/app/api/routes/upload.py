@@ -2,9 +2,11 @@
 
 import uuid
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File
 
+from app.api.deps import get_active_account
 from app.core.config import settings
+from app.models.auth import Account
 
 router = APIRouter()
 
@@ -14,16 +16,21 @@ TEMP_DIR.mkdir(exist_ok=True)
 
 
 @router.post("/upload/images")
-async def upload_images(files: list[UploadFile] = File(...)):
+async def upload_images(
+    files: list[UploadFile] = File(...),
+    account: Account = Depends(get_active_account),
+):
     """
     上传图片，返回临时 image_ids。
     前端拿到 image_ids 后调用 /api/analyze 进行分析。
     """
     image_ids = []
+    account_dir = TEMP_DIR / account.id
+    account_dir.mkdir(parents=True, exist_ok=True)
     for f in files:
         image_id = uuid.uuid4().hex[:8]
         suffix = Path(f.filename).suffix or ".jpg"
-        temp_path = TEMP_DIR / f"{image_id}{suffix}"
+        temp_path = account_dir / f"{image_id}{suffix}"
         content = await f.read()
         temp_path.write_bytes(content)
         image_ids.append({"id": image_id, "path": str(temp_path), "filename": f.filename})

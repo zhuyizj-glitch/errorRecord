@@ -10,7 +10,8 @@ class StorageBackend(Protocol):
     async def save_question(
         self,
         question_id: str,
-        child: str,
+        account_id: str,
+        child_id: str,
         subject: str,
         frontmatter: dict,
         body: str,
@@ -34,7 +35,8 @@ class StorageBackend(Protocol):
 
     async def list_questions(
         self,
-        child: str,
+        account_id: str,
+        child_id: str,
         subject: Optional[str] = None,
     ) -> list[dict]:
         """

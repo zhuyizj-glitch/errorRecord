@@ -19,7 +19,8 @@ class TaskStatus(str, Enum):
 @dataclass
 class AnalysisTask:
     id: str
-    child: str
+    account_id: str
+    child_id: str
     subject: str
     image_ids: list[dict]
     status: TaskStatus = TaskStatus.PENDING
@@ -45,12 +46,15 @@ class TaskManager:
         self.tasks: dict[str, AnalysisTask] = {}
         self._lock = asyncio.Lock()
 
-    def create_task(self, child: str, subject: str, image_ids: list[dict]) -> AnalysisTask:
+    def create_task(
+        self, account_id: str, child_id: str, subject: str, image_ids: list[dict]
+    ) -> AnalysisTask:
         """创建新任务"""
         task_id = uuid.uuid4().hex[:8]
         task = AnalysisTask(
             id=task_id,
-            child=child,
+            account_id=account_id,
+            child_id=child_id,
             subject=subject,
             image_ids=image_ids,
         )
@@ -61,11 +65,11 @@ class TaskManager:
         """获取任务"""
         return self.tasks.get(task_id)
 
-    def list_tasks(self, child: Optional[str] = None) -> list[dict]:
+    def list_tasks(self, account_id: str, child_id: Optional[str] = None) -> list[dict]:
         """列出任务（按创建时间倒序）"""
-        tasks = list(self.tasks.values())
-        if child:
-            tasks = [t for t in tasks if t.child == child]
+        tasks = [task for task in self.tasks.values() if task.account_id == account_id]
+        if child_id:
+            tasks = [task for task in tasks if task.child_id == child_id]
         tasks.sort(key=lambda t: t.created_at, reverse=True)
         return [t.to_dict() for t in tasks]
 
