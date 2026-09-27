@@ -1,6 +1,8 @@
 """同步 API 路由"""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from app.api.deps import require_admin
+from app.models.auth import Account
 from app.services.sync_service import get_sync_service
 from app.core.config import settings
 
@@ -8,7 +10,7 @@ router = APIRouter()
 
 
 @router.post("/sync/to-obsidian")
-async def manual_sync_to_obsidian():
+async def manual_sync_to_obsidian(_: Account = Depends(require_admin)):
     """
     手动触发同步到 Obsidian
 
@@ -31,7 +33,7 @@ async def manual_sync_to_obsidian():
 
 
 @router.get("/sync/status")
-async def get_sync_status():
+async def get_sync_status(_: Account = Depends(require_admin)):
     """
     获取同步状态
 
@@ -50,7 +52,7 @@ async def get_sync_status():
 
 
 @router.get("/sync/config")
-async def get_sync_config():
+async def get_sync_config(_: Account = Depends(require_admin)):
     """
     获取同步配置信息
 

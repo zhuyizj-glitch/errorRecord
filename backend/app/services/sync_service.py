@@ -6,6 +6,7 @@ from typing import Optional
 
 from app.services.storage_manager import get_storage_manager
 from app.services.ima_storage import IMAStorageBackend
+from app.db import database
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,12 @@ class SyncService:
             logger.info("开始同步: IMA → Obsidian")
 
             if isinstance(self.storage_manager.primary, IMAStorageBackend):
-                stats = await self.storage_manager.sync_to_obsidian()
+                with database.connect() as connection:
+                    rows = connection.execute(
+                        "SELECT account_id, id FROM children"
+                    ).fetchall()
+                allowed_scopes = {(row["account_id"], row["id"]) for row in rows}
+                stats = await self.storage_manager.sync_to_obsidian(allowed_scopes)
                 self.last_sync_time = datetime.now()
                 self.sync_stats = stats
                 logger.info(f"同步完成: {stats}")

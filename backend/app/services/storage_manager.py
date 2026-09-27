@@ -129,10 +129,10 @@ class StorageManager:
             return await self.fallback.get_image_url(storage_id, filename)
         return None
 
-    async def sync_to_obsidian(self) -> dict:
+    async def sync_to_obsidian(self, allowed_scopes: set[tuple[str, str]]) -> dict:
         """同步到 Obsidian（仅当使用 IMA 时有效）"""
         if isinstance(self.primary, IMAStorageBackend) and isinstance(self.fallback, FileStorageBackend):
-            return await self.primary.sync_to_obsidian(self.fallback)
+            return await self.primary.sync_to_obsidian(self.fallback, allowed_scopes)
         else:
             logger.info("当前不是 IMA + File 模式，跳过同步")
             return {"created": 0, "updated": 0, "deleted": 0}

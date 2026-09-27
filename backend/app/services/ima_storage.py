@@ -317,7 +317,9 @@ class IMAStorageBackend:
                 frontmatter["_file"] = note_id  # 兼容现有代码
                 results.append(frontmatter)
 
-            logger.info(f"IMA 错题列表: {child}/{subject or '全部'} → {len(results)} 条")
+            logger.info(
+                f"IMA 错题列表: {account_id}/{child_id}/{subject or '全部'} → {len(results)} 条"
+            )
             return results
 
         except Exception as e:
@@ -359,7 +361,7 @@ class IMAStorageBackend:
 
             # 生成标题
             title = self._build_title(
-                frontmatter.get("child", ""),
+                frontmatter.get("child_id", ""),
                 frontmatter.get("subject", ""),
                 frontmatter,
             )
@@ -373,7 +375,7 @@ class IMAStorageBackend:
                 title=title,
                 content=content,
                 tags=[
-                    frontmatter.get("child", ""),
+                    frontmatter.get("child_name", ""),
                     frontmatter.get("subject", ""),
                     frontmatter.get("error_type", ""),
                     frontmatter.get("id", ""),
@@ -425,7 +427,7 @@ class IMAStorageBackend:
             # 简化实现：假设源存储实现了列出所有错题的方法
 
             # 获取 IMA 中已有的错题 ID
-            ima_questions = await self.list_questions("", None)  # 获取所有
+            ima_questions = await self.list_questions("", "", None)
             ima_ids = {q.get("id") for q in ima_questions if q.get("id")}
 
             # 遍历源存储（这里需要源存储支持遍历所有孩子和学科）
@@ -438,7 +440,11 @@ class IMAStorageBackend:
             logger.error(f"同步过程出错: {e}")
             return stats
 
-    async def sync_to_obsidian(self, file_storage: StorageBackend) -> dict:
+    async def sync_to_obsidian(
+        self,
+        file_storage: StorageBackend,
+        allowed_scopes: set[tuple[str, str]],
+    ) -> dict:
         """
         从 IMA 同步到 Obsidian（本地文件）
 
@@ -454,7 +460,7 @@ class IMAStorageBackend:
                 logger.info("IMA 中没有笔记，跳过同步")
                 return stats
 
-            # 本地已有错题的缓存：{(child, subject): {id: file_path}}
+            # 本地已有错题的缓存：{(account_id, child_id, subject): {id: file_path}}
             local_cache: dict[tuple, dict] = {}
 
             for note in all_notes:
@@ -472,13 +478,21 @@ class IMAStorageBackend:
                         note_content.get("content", "")
                     )
 
-                    child = frontmatter.get("child")
+                    account_id = frontmatter.get("account_id")
+                    child_id = frontmatter.get("child_id")
                     subject = frontmatter.get("subject")
                     question_id = frontmatter.get("id")
 
                     # 不是错题笔记（缺少必要字段），跳过
-                    if not all([child, subject, question_id]):
+                    if not all([account_id, child_id, subject, question_id]):
                         stats["skipped"] += 1
+                        continue
+                    if (account_id, child_id) not in allowed_scopes:
+                        logger.error(
+                            f"IMA 笔记归属未知，拒绝同步: {note_id} "
+                            f"({account_id}/{child_id})"
+                        )
+                        stats["errors"] += 1
                         continue
 
                     # 清理内部字段
@@ -488,9 +502,11 @@ class IMAStorageBackend:
                     }
 
                     # 查本地（带缓存，避免重复扫目录）
-                    cache_key = (child, subject)
+                    cache_key = (account_id, child_id, subject)
                     if cache_key not in local_cache:
-                        local_list = await file_storage.list_questions(child, subject)
+                        local_list = await file_storage.list_questions(
+                            account_id, child_id, subject
+                        )
                         local_cache[cache_key] = {
                             q.get("id"): q.get("_file")
                             for q in local_list
@@ -511,7 +527,8 @@ class IMAStorageBackend:
                         # 新建
                         new_path = await file_storage.save_question(
                             question_id=question_id,
-                            child=child,
+                            account_id=account_id,
+                            child_id=child_id,
                             subject=subject,
                             frontmatter=clean_fm,
                             body=body,
