@@ -1,7 +1,7 @@
 """应用配置"""
 
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pathlib import Path
 
 
@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     vault_path: str = "/vault"
     config_path: str = "/app/config"
     cors_origins: str = "http://localhost:5173"
+    database_url_value: str = Field(default="", validation_alias="DATABASE_URL")
 
     # IMA 配置
     ima_api_key: str = ""
@@ -53,6 +54,10 @@ class Settings(BaseSettings):
     @property
     def settings_file(self) -> Path:
         return self.config_dir / "settings.json"
+
+    @property
+    def database_url(self) -> str:
+        return self.database_url_value or f"sqlite:///{self.config_dir / 'app.db'}"
 
 
 settings = Settings()
