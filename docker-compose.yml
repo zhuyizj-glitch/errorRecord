@@ -16,7 +16,9 @@ services:
     environment:
       - VAULT_PATH=/vault
       - CONFIG_PATH=/app/config
+      - DATABASE_URL=sqlite:////app/config/app.db
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
       # IMA 配置
       - IMA_ENABLED=${IMA_ENABLED:-false}
       - IMA_API_KEY=${IMA_API_KEY:-}

@@ -2221,3 +2221,20 @@ def _build_note_content(self, frontmatter, body, title=None):
 如果选择全量 EdgeOne 部署，建议改为：Pages 承载前端；Python Cloud Functions 承载 FastAPI；Neon/PostgreSQL 或腾讯云数据库承载账号和业务元数据；COS 或 EdgeOne Blob 承载图片；任务状态放数据库并使用可恢复的异步执行方式；IMA 改为直接 HTTP OpenAPI 调用。Obsidian 回流改为宿主机定时拉取，而不是云函数直接写本地 vault。
 
 如果保留现有 Docker 后端，EdgeOne 只部署静态前端并反向访问宿主机 API，则改动较小，但宿主机仍需持续在线，且必须处理 HTTPS、跨域和公网入口。综合稳定性与改造成本，近期继续 Docker/Tailscale 最稳；决定正式公网化后，再按全量 EdgeOne 方案改造持久层。
+
+### 8.29 多账号功能实施记录（2026-09-27）
+
+本次已按 8.27 的设计完成多账号主体改造：
+
+- 增加 SQLite 账号、会话、邀请码、孩子和课程数据表，数据库固定持久化在 `config/app.db`。
+- 增加首次管理员初始化、登录、退出、一次性邀请注册、修改密码、管理员重置密码和会话撤销。密码使用 scrypt 加盐哈希，会话使用 HttpOnly Cookie。
+- 增加管理员网页，可生成/查看/作废邀请码、查看账号、为账号重置临时密码。邀请码和临时密码只在生成时显示明文。
+- 孩子改为账号内动态创建，每个孩子可选语、数、英、物、化、生、政、史、地。孩子支持改名、更换 emoji 和调整课程，本期不删除孩子。
+- 错题、图片、上传临时文件、分析任务、复习和统计均由服务端按当前账号强制校验；跨账号请求返回 404。Obsidian 目录改为 `accounts/{account_id}/{child_id}/{subject}`。
+- IMA 笔记补充 `account_id`/`child_id`/`child_name`，列表、读取和同步强制按账号范围处理；手动同步仅管理员可执行。
+- 全局 LLM 配置仅管理员可读取、修改和测试，普通账号直接请求返回 403。
+- 错题不再提供删除入口，保留历史记录，由掌握度和重做结果调整复习频率。
+
+历史数据迁移脚本为 `backend/scripts/migrate_to_accounts.py`。它默认 dry-run，正式执行前备份 SQLite、旧 `daughter/son` 目录和图片，然后迁移 Markdown 并补写 IMA 元数据，支持幂等重跑。真实数据要在新版首次管理员初始化后，先核对 dry-run 计数再正式执行。
+
+验证结果：后端 25 项测试全部通过，包括账号隔离、邀请码、密码重置、图片访问、复习提交、IMA 范围和历史迁移；前端 TypeScript 与 Vite/PWA 生产构建通过。
