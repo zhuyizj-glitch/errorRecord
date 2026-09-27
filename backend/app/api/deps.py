@@ -27,3 +27,9 @@ def require_admin(account: Account = Depends(get_current_account)) -> Account:
     if account.role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
     return account
+
+
+def get_active_account(account: Account = Depends(get_current_account)) -> Account:
+    if account.must_change_password:
+        raise HTTPException(status_code=403, detail="PASSWORD_CHANGE_REQUIRED")
+    return account
