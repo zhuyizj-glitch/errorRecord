@@ -39,7 +39,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!currentChild) return
     setLoading(true)
-    fetch(`/api/stats/overview?child=${currentChild}`)
+    fetch(`/api/stats/overview?child_id=${currentChild}`)
       .then(r => r.json())
       .then(data => setStats(data))
       .catch(console.error)
@@ -89,7 +89,7 @@ export default function DashboardPage() {
     <div>
       <h2>📊 学习统计</h2>
       <p style={{ color: 'var(--color-text-secondary)', marginBottom: '24px' }}>
-        {currentChild === 'daughter' ? '👧 女儿' : '👦 儿子'}的学习数据总览
+        {useStore.getState().children.find(child => child.id === currentChild)?.name}的学习数据总览
       </p>
 
       {/* 概览卡片 */}

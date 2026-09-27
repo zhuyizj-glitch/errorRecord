@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore'
-import { fetchQuestions, deleteQuestion } from '../api/client'
+import { fetchQuestions } from '../api/client'
 import type { Question } from '../types'
 
 export default function ListPage() {
@@ -25,22 +25,15 @@ export default function ListPage() {
       .finally(() => setLoading(false))
   }, [currentChild, currentSubject])
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('确定删除这道错题吗？')) return
-    if (!currentChild || !currentSubject) return
-    await deleteQuestion(id, currentChild, currentSubject)
-    setQuestions(prev => prev.filter(q => q.id !== id))
-  }
-
   const handleMove = async (id: string) => {
     if (!currentChild || !currentSubject) return
     if (!moveChild || !moveSubject) return
 
     try {
       const params = new URLSearchParams({
-        child: currentChild,
+        child_id: currentChild,
         subject: currentSubject,
-        new_child: moveChild,
+        new_child_id: moveChild,
         new_subject: moveSubject,
       })
       await fetch(`/api/questions/${id}?${params}`, { method: 'PATCH' })
@@ -56,7 +49,7 @@ export default function ListPage() {
   const startEditing = (id: string) => {
     const q = questions.find(q => q.id === id)
     if (q) {
-      setMoveChild(q.child)
+      setMoveChild(q.child_id)
       setMoveSubject(q.subject)
       setEditingId(id)
     }
@@ -134,7 +127,7 @@ export default function ListPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
         {filtered.map(q => (
           <div key={q.id}
-            onClick={() => navigate(`/question/${q.id}?child=${currentChild}&subject=${currentSubject}`)}
+            onClick={() => navigate(`/question/${q.id}?child_id=${currentChild}&subject=${currentSubject}`)}
             style={{
             background: 'var(--color-surface)',
             borderRadius: 'var(--radius-md)',
@@ -188,20 +181,6 @@ export default function ListPage() {
                 >
                   ↗️
                 </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleDelete(q.id) }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#ccc',
-                    fontSize: '18px',
-                    padding: '4px',
-                    cursor: 'pointer',
-                  }}
-                  title="删除"
-                >
-                  ×
-                </button>
               </div>
             </div>
             {/* 移动 UI */}
@@ -231,8 +210,8 @@ export default function ListPage() {
                     fontSize: '13px',
                   }}
                 >
-                  {Object.entries(children).map(([key, child]) => (
-                    <option key={key} value={key}>{child.emoji} {child.name}</option>
+                  {children.map(child => (
+                    <option key={child.id} value={child.id}>{child.emoji} {child.name}</option>
                   ))}
                 </select>
                 <select
@@ -245,7 +224,7 @@ export default function ListPage() {
                     fontSize: '13px',
                   }}
                 >
-                  {(children[moveChild]?.subjects || []).map(s => (
+                  {(children.find(child => child.id === moveChild)?.subjects || []).map(s => (
                     <option key={s} value={s}>{s}</option>
                   ))}
                 </select>

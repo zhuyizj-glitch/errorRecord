@@ -1,18 +1,26 @@
 /** 类型定义 */
 
 export interface Child {
+  id: string
   name: string
   emoji: string
   subjects: string[]
 }
 
-export interface ChildrenMap {
-  [key: string]: Child
+export interface ChildrenResponse { children: Child[]; available_subjects: string[] }
+
+export interface Account {
+  id: string
+  username: string
+  display_name: string
+  role: 'admin' | 'user'
+  must_change_password: boolean
 }
 
 export interface Question {
   id: string
-  child: string
+  child_id: string
+  child_name?: string
   subject: string
   topic: string
   error_type?: string

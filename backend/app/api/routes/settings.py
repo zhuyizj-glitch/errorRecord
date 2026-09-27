@@ -1,9 +1,11 @@
 """设置接口"""
 
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.api.deps import require_admin
 from app.core.config import settings
+from app.models.auth import Account
 from app.models.settings import Settings, TestConnectionRequest
 from app.services import llm
 
@@ -25,7 +27,7 @@ def _load_real_key() -> str:
 
 
 @router.get("/settings")
-async def get_settings():
+async def get_settings(_: Account = Depends(require_admin)):
     """获取 LLM 设置（API Key 脱敏）"""
     settings_file = settings.settings_file
     if not settings_file.exists():
@@ -40,7 +42,7 @@ async def get_settings():
 
 
 @router.put("/settings")
-async def save_settings(s: Settings):
+async def save_settings(s: Settings, _: Account = Depends(require_admin)):
     """保存 LLM 设置（如果 API Key 是脱敏的，保留原 key）"""
     settings_file = settings.settings_file
     settings_file.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +58,7 @@ async def save_settings(s: Settings):
 
 
 @router.post("/settings/test")
-async def test_connection(req: TestConnectionRequest):
+async def test_connection(req: TestConnectionRequest, _: Account = Depends(require_admin)):
     """测试 LLM 连接（如果 API Key 是脱敏的，使用配置文件中的真实 key）"""
     api_key = req.api_key
     if _is_masked_key(api_key):

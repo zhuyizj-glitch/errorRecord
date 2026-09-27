@@ -14,7 +14,7 @@ export default function DetailPage() {
   const { id } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const child = searchParams.get('child') || ''
+  const childId = searchParams.get('child_id') || ''
   const subject = searchParams.get('subject') || ''
 
   const [question, setQuestion] = useState<Question | null>(null)
@@ -23,11 +23,11 @@ export default function DetailPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!id || !child || !subject) return
+    if (!id || !childId || !subject) return
 
     Promise.all([
-      fetch(`${import.meta.env.VITE_API_URL || ''}/api/questions/${id}?child=${child}&subject=${subject}`).then(r => r.json()),
-      fetch(`${import.meta.env.VITE_API_URL || ''}/api/questions/${id}/images?child=${child}&subject=${subject}`).then(r => r.json()),
+      fetch(`${import.meta.env.VITE_API_URL || ''}/api/questions/${id}?child_id=${childId}&subject=${subject}`).then(r => r.json()),
+      fetch(`${import.meta.env.VITE_API_URL || ''}/api/questions/${id}/images?child_id=${childId}&subject=${subject}`).then(r => r.json()),
     ])
       .then(([qData, imgData]) => {
         const { _body, _file, ...rest } = qData
@@ -37,7 +37,7 @@ export default function DetailPage() {
       })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [id, child, subject])
+  }, [id, childId, subject])
 
   if (loading) return (
     <div style={{ textAlign: 'center', padding: '60px', color: 'var(--color-text-secondary)' }}>
@@ -85,7 +85,7 @@ export default function DetailPage() {
           <div>
             <h2 style={{ margin: '0 0 8px 0', fontSize: '22px' }}>{question.topic}</h2>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
-              <span>{child === 'daughter' ? '👧 女儿' : '👦 儿子'} · {subject}</span>
+              <span>{question?.child_name || '孩子'} · {subject}</span>
               <span>📅 {question.error_date}</span>
               {question.error_type && <span>🏷 {question.error_type}</span>}
               <span>📊 {question.difficulty}</span>

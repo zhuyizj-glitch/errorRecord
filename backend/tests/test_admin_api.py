@@ -56,6 +56,10 @@ class AdminApiTest(unittest.TestCase):
         user, _ = self._create_user()
         self.assertEqual(user.get("/api/admin/invites").status_code, 403)
         self.assertEqual(user.get("/api/admin/accounts").status_code, 403)
+        self.assertEqual(user.get("/api/settings").status_code, 403)
+        self.assertEqual(user.put("/api/settings", json={
+            "llm": {"api_base": "https://example.com", "api_key": "secret", "model": "x"}
+        }).status_code, 403)
 
     def test_password_reset_revokes_sessions_and_forces_change(self):
         user, account = self._create_user()

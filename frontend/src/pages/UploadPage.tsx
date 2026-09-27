@@ -16,7 +16,7 @@ interface UploadedImage {
 
 interface Task {
   id: string
-  child: string
+  child_id: string
   subject: string
   status: 'pending' | 'processing' | 'completed' | 'failed'
   result: AnalyzeResult | null
@@ -38,9 +38,7 @@ export default function UploadPage() {
   const [error, setError] = useState('')
 
   // 获取所有学科列表
-  const allSubjects = currentChild && children[currentChild]
-    ? children[currentChild].subjects
-    : []
+  const allSubjects = children.find(child => child.id === currentChild)?.subjects || []
 
   // 轮询任务状态 - 使用 ref 避免闭包问题
   const tasksRef = useRef(tasks)
@@ -87,11 +85,11 @@ export default function UploadPage() {
       }
 
       // 2. 创建异步任务
-      const taskRes = await fetch(`/api/tasks?child=${currentChild}&subject=${encodeURIComponent(currentSubject)}`, {
+      const taskRes = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          child: currentChild,
+          child_id: currentChild,
           subject: currentSubject,
           image_ids: uploadRes.image_ids,
         }),
@@ -100,7 +98,7 @@ export default function UploadPage() {
       // 3. 添加到任务列表
       const newTask: Task = {
         id: taskRes.task_id,
-        child: currentChild,
+        child_id: currentChild,
         subject: currentSubject,
         status: 'pending',
         result: null,
@@ -126,7 +124,7 @@ export default function UploadPage() {
     if (!task.result) return
     try {
       await createQuestion({
-        child: task.child,
+        child_id: task.child_id,
         subject: task.subject,
         topic: task.result.metadata.topic,
         error_type: task.result.error_analysis?.error_type || null,
@@ -219,8 +217,8 @@ export default function UploadPage() {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, refineFeedback: feedback } : t))
   }
 
-  const updateTaskChild = (taskId: string, child: string) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, child } : t))
+  const updateTaskChild = (taskId: string, child_id: string) => {
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, child_id } : t))
   }
 
   const updateTaskSubject = (taskId: string, subject: string) => {
@@ -246,7 +244,7 @@ export default function UploadPage() {
           fontSize: '13px',
           fontWeight: 500,
         }}>
-          {currentChild === 'daughter' ? '👧 女儿' : '👦 儿子'} · {currentSubject}
+          {children.find(child => child.id === currentChild)?.emoji} {children.find(child => child.id === currentChild)?.name} · {currentSubject}
         </span>
       </div>
       <p style={{ color: 'var(--color-text-secondary)', marginBottom: '20px', fontSize: '14px' }}>
@@ -356,7 +354,7 @@ function TaskCard({
   task: Task
   statusConfig: Record<string, { icon: string; color: string; label: string }>
   allSubjects: string[]
-  children: Record<string, { name: string; emoji: string; subjects: string[] }>
+  children: Array<{ id: string; name: string; emoji: string; subjects: string[] }>
   onSave: () => void
   onRetry: () => void
   onDismiss: () => void
@@ -395,7 +393,7 @@ function TaskCard({
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <strong style={{ fontSize: '14px' }}>
-              {task.child === 'daughter' ? '👧 女儿' : '👦 儿子'} · {task.subject}
+              {children.find(child => child.id === task.child_id)?.emoji} {children.find(child => child.id === task.child_id)?.name} · {task.subject}
             </strong>
             <span style={{
               fontSize: '12px',
@@ -501,7 +499,7 @@ function TaskCard({
                 归属孩子
               </label>
               <select
-                value={task.child}
+                value={task.child_id}
                 onChange={e => onUpdateChild(e.target.value)}
                 style={{
                   width: '100%',
@@ -511,8 +509,8 @@ function TaskCard({
                   fontSize: '13px',
                 }}
               >
-                {Object.entries(children).map(([key, child]) => (
-                  <option key={key} value={key}>{child.emoji} {child.name}</option>
+                {children.map(child => (
+                  <option key={child.id} value={child.id}>{child.emoji} {child.name}</option>
                 ))}
               </select>
             </div>
@@ -532,7 +530,7 @@ function TaskCard({
                 }}
               >
                 {/* 显示选中孩子的所有学科 */}
-                {(children[task.child]?.subjects || allSubjects).map(s => (
+                {(children.find(child => child.id === task.child_id)?.subjects || allSubjects).map(s => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>

@@ -10,9 +10,7 @@ export default function SubjectSelector() {
   const setSubject = useStore(s => s.setSubject)
 
   const subjects = useMemo(() =>
-    currentChild && children[currentChild]
-      ? children[currentChild].subjects
-      : [],
+    children.find(child => child.id === currentChild)?.subjects || [],
     [children, currentChild]
   )
 
@@ -20,7 +18,7 @@ export default function SubjectSelector() {
     if (subjects.length > 0) {
       setSubject(subjects[0])
     }
-  }, [currentChild]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentChild, subjects.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!subjects.length) return null
 
