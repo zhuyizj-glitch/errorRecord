@@ -1,0 +1,42 @@
+<!--
+  错题集 PWA 图标源文件
+  由 scripts/make-icons.mjs 栅格化为 public/icon-192x192.png 与 icon-512x512.png
+
+  设计说明：
+  · 蓝色渐变底：与应用主色（#0a84ff）一致，且在任意壁纸上都醒目
+    （纯黑图标放到深色壁纸上会「消失」，所以底色不用黑）
+  · 白色本子：错题「本」的直接隐喻
+  · 蓝色勾：把错题变成掌握的标记，也是应用的核心行为
+
+  maskable 要求：manifest 里声明了 purpose: "any maskable"，
+  系统可能把图标裁成圆形只保留中心 80%。所以背景必须全出血，
+  关键图形要落在中心安全区内 —— 本子占 126~386，安全区是 51~461，符合。
+
+  注意：本子不要加「装订边」之类的侧边装饰。第一版加了一条浅色竖条，
+  在小尺寸下看起来像渲染错位而不是设计元素，已去掉。
+-->
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.65" y2="1">
+      <stop offset="0%" stop-color="#0a84ff"/>
+      <stop offset="100%" stop-color="#0052cc"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#eef3ff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景：全出血 -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+
+  <!-- 本子 -->
+  <rect x="126" y="100" width="260" height="312" rx="32" fill="url(#paper)" />
+
+  <!-- 勾：放大到几乎撑满本子，并在纵向略微上提。
+       对勾的形状天然是「左下重、右上轻」，纯按包围盒居中会显得偏左下，
+       所以这里往右上各偏一点点做视觉配重。 -->
+  <path d="M172 248 L228 306 L348 180"
+        stroke="#0a84ff" stroke-width="46"
+        stroke-linecap="round" stroke-linejoin="round" fill="none" />
+</svg>

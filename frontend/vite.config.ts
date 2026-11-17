@@ -12,8 +12,8 @@ export default defineConfig({
         name: '错题集 - AI 智能错题管理系统',
         short_name: '错题集',
         description: '拍照上传，AI 自动分析，智能复习计划',
-        theme_color: '#6366f1',
-        background_color: '#0f0f1a',
+        theme_color: '#1c1c1e',
+        background_color: '#000000',
         display: 'standalone',
         orientation: 'portrait',
         scope: '/',
@@ -35,52 +35,18 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-cache',
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'gstatic-fonts-cache',
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
-            // API 请求使用网络优先策略
-            urlPattern: /\/api\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24, // 1 day
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-              networkTimeoutSeconds: 10,
-            },
-          },
-        ],
+        // 刻意不缓存 /api/*：
+        //
+        // 原先这里有一条 urlPattern: /\/api\/.*/i 的 NetworkFirst 规则，
+        // 会把 API 响应写进浏览器 Cache Storage 并保留 1 天。而错题响应是
+        // 带鉴权的个人数据——多账号共用一台设备时（比如共用平板、爸妈的手机），
+        // 换账号登录后仍可能从缓存里读到上一个人的错题内容。这是隐私问题，
+        // 不只是性能问题，所以整条规则移除，API 一律走网络。
+        //
+        // 同时移除两条 Google Fonts 缓存规则：项目里并没有引用 Google Fonts
+        // （字体栈是系统字体 -apple-system / PingFang SC / Microsoft YaHei），
+        // 那两条属于永远不会命中的死配置。
+        runtimeCaching: [],
       },
     }),
   ],

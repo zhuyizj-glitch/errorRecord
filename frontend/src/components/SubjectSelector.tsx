@@ -36,6 +36,10 @@ export default function SubjectSelector() {
         cursor: 'pointer',
       }}
     >
+      {/* 「全部」用于列表页按孩子看所有学科。值为空字符串，
+          列表页会把它转成 undefined 传给后端（即不加学科过滤）。
+          上传页需要具体学科，那一页会拦住这个情况并给出提示。 */}
+      <option value="">全部</option>
       {subjects.map(s => (
         <option key={s} value={s}>{s}</option>
       ))}

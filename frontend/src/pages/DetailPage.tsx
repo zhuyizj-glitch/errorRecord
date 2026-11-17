@@ -2,13 +2,20 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
+import {
+  AlertTriangle,
+  BarChart3,
+  BookOpen,
+  Calendar,
+  CircleCheck,
+  CircleX,
+  LoaderCircle,
+  RefreshCw,
+  ScrollText,
+  Tag,
+} from 'lucide-react'
 import type { Question } from '../types'
 import { renderMarkdownWithMath } from '../utils/mathRenderer'
-
-interface ImageInfo {
-  filename: string
-  url: string
-}
 
 export default function DetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -19,21 +26,17 @@ export default function DetailPage() {
 
   const [question, setQuestion] = useState<Question | null>(null)
   const [body, setBody] = useState('')
-  const [images, setImages] = useState<ImageInfo[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!id || !childId || !subject) return
 
-    Promise.all([
-      fetch(`${import.meta.env.VITE_API_URL || ''}/api/questions/${id}?child_id=${childId}&subject=${subject}`).then(r => r.json()),
-      fetch(`${import.meta.env.VITE_API_URL || ''}/api/questions/${id}/images?child_id=${childId}&subject=${subject}`).then(r => r.json()),
-    ])
-      .then(([qData, imgData]) => {
+    fetch(`${import.meta.env.VITE_API_URL || ''}/api/questions/${id}?child_id=${childId}&subject=${subject}`)
+      .then(r => r.json())
+      .then(qData => {
         const { _body, _file, ...rest } = qData
         setQuestion(rest as Question)
         setBody(_body || '')
-        setImages(imgData.images || [])
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -41,7 +44,9 @@ export default function DetailPage() {
 
   if (loading) return (
     <div style={{ textAlign: 'center', padding: '60px', color: 'var(--color-text-secondary)' }}>
-      <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
+      <div style={{ marginBottom: '12px' }}>
+        <LoaderCircle size={32} color="var(--color-text-tertiary)" />
+      </div>
       加载中...
     </div>
   )
@@ -57,10 +62,10 @@ export default function DetailPage() {
 
   const masteryColor = (level: string) => {
     switch (level) {
-      case 'low': return '#d32f2f'
-      case 'medium': return '#f57c00'
-      case 'high': return '#2e7d32'
-      default: return '#999'
+      case 'low': return '#ff3b30'
+      case 'medium': return '#ff9500'
+      case 'high': return '#34c759'
+      default: return '#8e8e93'
     }
   }
 
@@ -86,9 +91,11 @@ export default function DetailPage() {
             <h2 style={{ margin: '0 0 8px 0', fontSize: '22px' }}>{question.topic}</h2>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
               <span>{question?.child_name || '孩子'} · {subject}</span>
-              <span>📅 {question.error_date}</span>
-              {question.error_type && <span>🏷 {question.error_type}</span>}
-              <span>📊 {question.difficulty}</span>
+              <span><Calendar size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />{question.error_date}</span>
+              {question.error_type && (
+                <span><Tag size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />{question.error_type}</span>
+              )}
+              <span><BarChart3 size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />{question.difficulty}</span>
             </div>
           </div>
           <div style={{
@@ -112,39 +119,16 @@ export default function DetailPage() {
           borderTop: '1px solid var(--color-border)',
           display: 'flex', gap: '24px', flexWrap: 'wrap', fontSize: '13px',
         }}>
-          <span>🔄 重做 <strong>{question.redo_count}</strong> 次</span>
-          <span>📅 下次复习 <strong>{question.next_review_date || '未安排'}</strong></span>
+          <span><RefreshCw size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />重做 <strong>{question.redo_count}</strong> 次</span>
+          <span><Calendar size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />下次复习 <strong>{question.next_review_date || '未安排'}</strong></span>
           {question.repeat_pattern && (
-            <span style={{ color: 'var(--color-error)' }}>⚠️ 重复犯错模式（连续 {question.repeat_streak} 次）</span>
+            <span style={{ color: 'var(--color-error)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <AlertTriangle size={14} />
+              重复犯错模式（连续 {question.repeat_streak} 次）
+            </span>
           )}
         </div>
       </div>
-
-      {/* 图片 */}
-      {images.length > 0 && (
-        <div style={{
-          background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
-          padding: '20px', border: '1px solid var(--color-border)', marginBottom: '20px',
-        }}>
-          <h3 style={{ margin: '0 0 12px 0', fontSize: '16px' }}>📷 题目图片</h3>
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            {images.map(img => (
-              <img
-                key={img.filename}
-                src={img.url}
-                alt={img.filename}
-                style={{
-                  maxWidth: '300px', maxHeight: '300px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--color-border)',
-                  cursor: 'pointer',
-                }}
-                onClick={() => window.open(img.url, '_blank')}
-              />
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* 正文内容 */}
       <div style={{
@@ -161,7 +145,10 @@ export default function DetailPage() {
           background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
           padding: '20px', border: '1px solid var(--color-border)',
         }}>
-          <h3 style={{ margin: '0 0 12px 0', fontSize: '16px' }}>📚 知识点</h3>
+          <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <BookOpen size={16} />
+            知识点
+          </h3>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {question.knowledge_points.map((kp, i) => (
               <span key={i} style={{
@@ -183,15 +170,20 @@ export default function DetailPage() {
           background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
           padding: '20px', border: '1px solid var(--color-border)', marginTop: '20px',
         }}>
-          <h3 style={{ margin: '0 0 12px 0', fontSize: '16px' }}>📝 重做记录</h3>
+          <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ScrollText size={16} />
+            重做记录
+          </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {question.redo_history && question.redo_history.map((r: any, i: number) => (
               <div key={i} style={{
                 display: 'flex', alignItems: 'center', gap: '12px',
                 padding: '8px 12px', borderRadius: 'var(--radius-sm)',
-                background: r.result === 'correct' ? '#e8f5e9' : '#fff3f3',
+                background: r.result === 'correct' ? 'var(--color-success-light)' : 'var(--color-error-light)',
               }}>
-                <span>{r.result === 'correct' ? '✅' : '❌'}</span>
+                {r.result === 'correct'
+                  ? <CircleCheck size={16} color="var(--color-success)" />
+                  : <CircleX size={16} color="var(--color-error)" />}
                 <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>{r.date}</span>
                 {r.note && <span style={{ fontSize: '13px' }}>{r.note}</span>}
               </div>

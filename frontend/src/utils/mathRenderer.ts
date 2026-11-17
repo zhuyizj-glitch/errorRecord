@@ -75,7 +75,7 @@ export function renderMarkdownWithMath(text: string): string {
     .replace(/^# (.+)$/gm, '<h2 style="margin: 24px 0 12px; font-size: 20px; font-weight: 700;">$1</h2>')
     .replace(/^\*\*(.+?)：?\*\*\s*(.*)$/gm, '<p style="margin: 6px 0;"><strong style="color: var(--color-text-secondary);">$1：</strong> $2</p>')
     .replace(/^!\[.*?\]\((.+?)\)$/gm, '<img src="$1" style="max-width: 100%; border-radius: 8px; margin: 8px 0;" />')
-    .replace(/^>\s*(.+)$/gm, '<blockquote style="margin: 8px 0; padding: 8px 16px; border-left: 3px solid var(--color-primary); background: #f8f9fa; border-radius: 0 6px 6px 0;">$1</blockquote>')
+    .replace(/^>\s*(.+)$/gm, '<blockquote style="margin: 8px 0; padding: 8px 16px; border-left: 3px solid var(--color-primary); background: var(--color-surface-2); border-radius: 0 6px 6px 0;">$1</blockquote>')
     .replace(/\n\n/g, '<br/><br/>')
 
   // 替换回数学公式

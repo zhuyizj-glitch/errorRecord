@@ -11,7 +11,7 @@ export default function InitializePage() {
   return <AuthCard title="初始化管理员"><p>首次使用需要创建管理员账号。</p><form onSubmit={submit} className="auth-form">
     <input required placeholder="用户名" onChange={e => setForm({ ...form, username: e.target.value })} />
     <input required placeholder="显示名称" onChange={e => setForm({ ...form, display_name: e.target.value })} />
-    <input required type="password" minLength={8} placeholder="密码（至少 8 位）" onChange={e => setForm({ ...form, password: e.target.value })} />
+    <input required type="password" minLength={10} placeholder="密码（至少 10 位）" onChange={e => setForm({ ...form, password: e.target.value })} />
     {error && <p className="form-error">{error}</p>}<button type="submit">创建管理员</button>
   </form></AuthCard>
 }

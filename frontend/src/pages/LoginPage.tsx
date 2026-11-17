@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { BookOpen } from 'lucide-react'
 import { login } from '../api/client'
 import { useAuthStore } from '../store/useAuthStore'
 
@@ -23,5 +24,5 @@ export default function LoginPage() {
 }
 
 export function AuthCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return <main className="auth-shell"><section className="auth-card"><h1>📝 {title}</h1>{children}</section></main>
+  return <main className="auth-shell"><section className="auth-card"><h1><BookOpen size={22} strokeWidth={2.4} style={{ verticalAlign: '-4px', marginRight: 8 }} />{title}</h1>{children}</section></main>
 }

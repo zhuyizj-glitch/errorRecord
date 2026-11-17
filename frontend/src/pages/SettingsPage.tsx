@@ -1,6 +1,7 @@
 /** 设置页面 */
 
 import { useEffect, useState } from 'react'
+import { LoaderCircle, PlugZap, Save, Settings } from 'lucide-react'
 import { fetchSettings, saveSettings, testConnection } from '../api/client'
 
 export default function SettingsPage() {
@@ -27,12 +28,13 @@ export default function SettingsPage() {
     setSaving(true)
     try {
       await saveSettings({
-        llm: { api_base: apiBase, api_key: apiKey, model, timeout: 60 },
+        // 120 秒：复杂整页题（多道题 + 手写）可能跑 40 秒以上，留足余量
+        llm: { api_base: apiBase, api_key: apiKey, model, timeout: 120 },
       })
-      setMessage({ type: 'success', text: '✅ 设置已保存' })
+      setMessage({ type: 'success', text: '设置已保存' })
       setTimeout(() => setMessage({ type: '', text: '' }), 3000)
     } catch {
-      setMessage({ type: 'error', text: '❌ 保存失败' })
+      setMessage({ type: 'error', text: '保存失败' })
     } finally {
       setSaving(false)
     }
@@ -43,9 +45,9 @@ export default function SettingsPage() {
     setMessage({ type: '', text: '' })
     try {
       const res = await testConnection({ api_base: apiBase, api_key: apiKey, model })
-      setMessage({ type: 'success', text: '✅ 连接成功: ' + (res.data?.reply || 'ok') })
+      setMessage({ type: 'success', text: '连接成功: ' + (res.data?.reply || 'ok') })
     } catch (e: any) {
-      setMessage({ type: 'error', text: '❌ 连接失败: ' + (e.response?.data?.detail || e.message) })
+      setMessage({ type: 'error', text: '连接失败: ' + (e.response?.data?.detail || e.message) })
     } finally {
       setTesting(false)
     }
@@ -63,7 +65,10 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <h2>⚙️ AI 模型设置</h2>
+      <h2 style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Settings size={20} />
+        AI 模型设置
+      </h2>
       <p style={{ color: 'var(--color-text-secondary)', marginBottom: '24px', fontSize: '14px' }}>
         配置多模态 LLM 接口（兼容 OpenAI API 格式）
       </p>
@@ -121,7 +126,9 @@ export default function SettingsPage() {
               fontWeight: 600,
             }}
           >
-            {saving ? '保存中...' : '💾 保存设置'}
+            {saving
+              ? <><LoaderCircle size={15} style={{ verticalAlign: '-2px', marginRight: 5 }} />保存中...</>
+              : <><Save size={15} style={{ verticalAlign: '-2px', marginRight: 5 }} />保存设置</>}
           </button>
           <button
             onClick={handleTest}
@@ -136,7 +143,9 @@ export default function SettingsPage() {
               fontWeight: 500,
             }}
           >
-            {testing ? '⏳ 测试中...' : '🔌 测试连接'}
+            {testing
+              ? <><LoaderCircle size={15} style={{ verticalAlign: '-2px', marginRight: 5 }} />测试中...</>
+              : <><PlugZap size={15} style={{ verticalAlign: '-2px', marginRight: 5 }} />测试连接</>}
           </button>
         </div>
 
@@ -146,9 +155,9 @@ export default function SettingsPage() {
             padding: '10px 16px',
             borderRadius: 'var(--radius-sm)',
             fontSize: '14px',
-            background: message.type === 'success' ? '#e8f5e9' : '#fff3f3',
+            background: message.type === 'success' ? 'var(--color-success-light)' : 'var(--color-error-light)',
             color: message.type === 'success' ? 'var(--color-success)' : 'var(--color-error)',
-            border: `1px solid ${message.type === 'success' ? '#a5d6a7' : '#ffcdd2'}`,
+            border: `1px solid ${message.type === 'success' ? 'var(--color-success)' : 'var(--color-error)'}`,
           }}>
             {message.text}
           </div>

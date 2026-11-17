@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ArrowUpRight, BookOpen, Calendar, Inbox, LoaderCircle, RefreshCw, Tag } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { fetchQuestions } from '../api/client'
 import type { Question } from '../types'
@@ -26,20 +27,24 @@ export default function ListPage() {
   }, [currentChild, currentSubject])
 
   const handleMove = async (id: string) => {
-    if (!currentChild || !currentSubject) return
-    if (!moveChild || !moveSubject) return
+    // 用这道题自己的归属来定位它，而不是当前筛选条件 ——
+    // 「全部」模式下 currentSubject 是空字符串，靠它定位会找不到题
+    const target = questions.find(item => item.id === id)
+    if (!target || !moveChild || !moveSubject) return
 
     try {
       const params = new URLSearchParams({
-        child_id: currentChild,
-        subject: currentSubject,
+        child_id: target.child_id,
+        subject: target.subject,
         new_child_id: moveChild,
         new_subject: moveSubject,
       })
       await fetch(`/api/questions/${id}?${params}`, { method: 'PATCH' })
-      // 刷新列表
-      const res = await fetchQuestions(currentChild, currentSubject)
-      setQuestions(res.questions || [])
+      // 刷新列表（保持当前筛选条件不变）
+      if (currentChild) {
+        const res = await fetchQuestions(currentChild, currentSubject || undefined)
+        setQuestions(res.questions || [])
+      }
       setEditingId(null)
     } catch (e) {
       console.error('Move failed:', e)
@@ -79,7 +84,9 @@ export default function ListPage() {
 
   if (loading) return (
     <div style={{ textAlign: 'center', padding: '60px', color: 'var(--color-text-secondary)' }}>
-      <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
+      <div style={{ marginBottom: '12px' }}>
+        <LoaderCircle size={32} color="var(--color-text-tertiary)" />
+      </div>
       加载中...
     </div>
   )
@@ -119,7 +126,9 @@ export default function ListPage() {
           borderRadius: 'var(--radius-lg)',
           marginTop: '16px',
         }}>
-          <div style={{ fontSize: '48px', marginBottom: '12px' }}>📭</div>
+          <div style={{ marginBottom: '12px' }}>
+            <Inbox size={44} strokeWidth={1.2} color="var(--color-text-tertiary)" />
+          </div>
           <p>还没有错题，去上传一道吧！</p>
         </div>
       )}
@@ -127,7 +136,11 @@ export default function ListPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
         {filtered.map(q => (
           <div key={q.id}
-            onClick={() => navigate(`/question/${q.id}?child_id=${currentChild}&subject=${currentSubject}`)}
+            onClick={() => {
+              // 带上这道题自己的学科，而不是当前筛选的学科 ——
+              // 「全部」模式下 currentSubject 是空字符串，传过去详情页会打不开
+              navigate(`/question/${q.id}?child_id=${currentChild}&subject=${q.subject}`)
+            }}
             style={{
             background: 'var(--color-surface)',
             borderRadius: 'var(--radius-md)',
@@ -156,13 +169,16 @@ export default function ListPage() {
                   </span>
                 </div>
                 <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                  {q.error_type && <span>🏷 {q.error_type}</span>}
-                  <span>🔄 重做 {q.redo_count} 次</span>
-                  <span>📅 {q.error_date}</span>
+                  {q.error_type && (
+                    <span><Tag size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />{q.error_type}</span>
+                  )}
+                  <span><RefreshCw size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />重做 {q.redo_count} 次</span>
+                  <span><Calendar size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />{q.error_date}</span>
                 </div>
                 {q.knowledge_points?.length > 0 && (
-                  <div style={{ marginTop: '6px', fontSize: '12px', color: '#999' }}>
-                    📚 {q.knowledge_points.join(' · ')}
+                  <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--color-text-tertiary)' }}>
+                    <BookOpen size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+                    {q.knowledge_points.join(' · ')}
                   </div>
                 )}
               </div>
@@ -172,14 +188,14 @@ export default function ListPage() {
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: '#999',
+                    color: 'var(--color-text-tertiary)',
                     fontSize: '14px',
                     padding: '4px 8px',
                     cursor: 'pointer',
                   }}
                   title="移动到其他孩子/学科"
                 >
-                  ↗️
+                  <ArrowUpRight size={16} />
                 </button>
               </div>
             </div>
@@ -190,7 +206,7 @@ export default function ListPage() {
                 style={{
                   marginTop: '12px',
                   padding: '12px',
-                  background: '#f8f9fa',
+                  background: 'var(--color-surface-2)',
                   borderRadius: 'var(--radius-sm)',
                   border: '1px solid var(--color-border)',
                   display: 'flex',

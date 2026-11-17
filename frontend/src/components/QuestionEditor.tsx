@@ -2,7 +2,7 @@
 
 export default function QuestionEditor() {
   return (
-    <div style={{ background: '#fff', borderRadius: '12px', padding: '20px' }}>
+    <div style={{ background: 'var(--color-surface)', borderRadius: '12px', padding: '20px' }}>
       <p>TODO: 错题编辑表单</p>
     </div>
   )
