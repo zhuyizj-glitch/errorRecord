@@ -107,9 +107,22 @@ export interface LLMSettings {
   timeout?: number
 }
 
-// ── v2.0 真题库 ──────────────────────────────────────────────
+// ── v2.0 真题库（三形态模型）──────────────────────────────────
 
-/** 真题库条目（账号级资源，不绑定孩子） */
+export type ZhentiForm = 'independent' | 'material_group' | 'passage'
+
+/** 材料组题/语篇整题的子题（各自独立打标） */
+export interface ZhentiSubQuestion {
+  number?: string
+  question_text: string
+  correct_answer: string
+  solution_steps?: string
+  knowledge_points: string[]
+  era?: string
+  module?: string
+}
+
+/** 真题库条目（账号级资源） */
 export interface ZhentiQuestion {
   id: string
   account_id: string
@@ -117,18 +130,25 @@ export interface ZhentiQuestion {
   year: string
   source: string
   number?: string
+  question_form: ZhentiForm
+  question_type?: string
+  rating?: string
   topic?: string
   knowledge_points: string[]
+  era?: string
+  module?: string
   difficulty: string
   has_diagram?: boolean
   diagram_description?: string
+  passage?: string
+  sub_questions?: ZhentiSubQuestion[]
   created_at: string
   practice_count: number
   correct_count: number
   wrong_count: number
   last_practice_at?: string | null
-  practice_history?: Array<{ date: string; child_id: string; result: string; note?: string }>
-  converted_to?: Array<{ child_id: string; child_name: string; question_id: string; date: string }>
+  practice_history?: Array<{ date: string; child_id: string; result: string; note?: string; sub_number?: string }>
+  converted_to?: Array<{ child_id: string; child_name: string; question_id: string; sub_number?: string; date: string }>
   _file?: string
   _body?: string
   _question?: string
@@ -137,9 +157,13 @@ export interface ZhentiQuestion {
   _structured?: boolean
 }
 
-/** AI 从真题卷拆出的单道题（空白卷，无学生作答） */
+/** AI 拆出的题目单元 */
 export interface ZhentiAnalysisItem {
   number?: string
+  question_form: ZhentiForm
+  question_type?: string
+  rating?: string
+  passage?: string
   question_text: string
   has_diagram?: boolean
   diagram_description?: string
@@ -147,8 +171,11 @@ export interface ZhentiAnalysisItem {
   solution_steps?: string
   topic?: string
   knowledge_points: string[]
+  era?: string
+  module?: string
   difficulty: string
   confidence?: string
+  sub_questions?: ZhentiSubQuestion[]
 }
 
 export interface ZhentiAnalyzeResult {
@@ -156,7 +183,6 @@ export interface ZhentiAnalyzeResult {
   questions: ZhentiAnalysisItem[]
 }
 
-/** 真题分析任务（kind=zhenti，meta 带年份/来源） */
 export interface ZhentiTask {
   id: string
   account_id: string
@@ -172,7 +198,6 @@ export interface ZhentiTask {
   completed_at?: string
 }
 
-/** 薄弱知识点（未掌握错题按知识点聚合） */
 export interface WeakPoint {
   knowledge_point: string
   weight: number
@@ -180,9 +205,17 @@ export interface WeakPoint {
   avg_mastery: number
 }
 
-/** 推荐真题：附带匹配得分与命中的薄弱点 */
 export interface ZhentiRecommendation extends ZhentiQuestion {
   match_score: number
   matched_points: string[]
+  matched_sub_numbers?: string[]
   child_practice_count: number
+}
+
+/** 题库筛选维度 */
+export interface ZhentiDimensions {
+  eras: string[]
+  modules: string[]
+  question_types: string[]
+  ratings: string[]
 }

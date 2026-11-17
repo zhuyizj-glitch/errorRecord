@@ -1,8 +1,9 @@
-"""薄弱点聚合与真题推荐（v2.0）
+"""薄弱点聚合与真题推荐（v2.0 · 三形态 + 时代/主题轴）
 
-匹配策略：知识点归一化后精确匹配。
-导入真题时已把库内词汇表注入提示词（build_exam_prompt），
-让 AI 尽量复用标签，从源头提高匹配率。
+匹配策略：
+- 独立小题与材料组/语篇的子题：知识点归一化精确匹配（子题可独立调用）
+- 历史按 era（朝代/时期）、政治按 module（主题）支持专项切片
+- 语篇整题（passage）按「题型 + 评级梯度」推荐，不做顶层知识点匹配
 """
 
 import re
@@ -10,21 +11,11 @@ from typing import Optional
 
 
 def normalize_kp(text: str) -> str:
-    """知识点标签归一化：去首尾空白、合并连续空白。
-
-    不做同义词扩展——「方程」这类宽泛词会过度匹配，
-    宁缺毋滥，匹配不上的薄弱点显式暴露给家长。
-    """
     return re.sub(r"\s+", " ", (text or "").strip())
 
 
 def collect_weak_points(questions: list[dict]) -> list[dict]:
-    """聚合孩子的薄弱知识点。
-
-    只统计未掌握的错题（mastery_status != mastered）；
-    每个知识点的薄弱度权重 = Σ(1 − mastery_score/100)，
-    错得越多、掌握度越低，权重越大。
-    """
+    """聚合孩子未掌握错题的薄弱知识点（权重 = Σ(1−掌握度/100)）"""
     agg: dict[str, dict] = {}
     for q in questions:
         if q.get("mastery_status") == "mastered":
@@ -41,7 +32,6 @@ def collect_weak_points(questions: list[dict]) -> list[dict]:
             entry["weight"] += weight
             entry["question_count"] += 1
             entry["mastery_sum"] += int(q.get("mastery_score", 0))
-
     result = []
     for entry in agg.values():
         count = entry["question_count"]
@@ -56,14 +46,20 @@ def collect_weak_points(questions: list[dict]) -> list[dict]:
 
 
 def knowledge_vocab(questions: list[dict], zhenti: list[dict]) -> list[str]:
-    """库内已有知识点词汇表（去重、归一化），供导入提示词注入。
-
-    错题标签优先（它们是薄弱点匹配的目标），真题标签补充。
-    """
+    """库内已有知识点词汇表（含子题标签），供导入提示词注入"""
     seen: dict[str, None] = {}
-    for source in (questions, zhenti):
-        for item in source:
-            for raw in item.get("knowledge_points") or []:
+    for item in questions:
+        for raw in item.get("knowledge_points") or []:
+            kp = normalize_kp(raw)
+            if kp:
+                seen.setdefault(kp, None)
+    for item in zhenti:
+        for raw in item.get("knowledge_points") or []:
+            kp = normalize_kp(raw)
+            if kp:
+                seen.setdefault(kp, None)
+        for sub in item.get("sub_questions") or []:
+            for raw in sub.get("knowledge_points") or []:
                 kp = normalize_kp(raw)
                 if kp:
                     seen.setdefault(kp, None)
@@ -71,11 +67,32 @@ def knowledge_vocab(questions: list[dict], zhenti: list[dict]) -> list[str]:
 
 
 def child_practice_count(zhenti_item: dict, child_id: str) -> int:
-    """某个孩子对这道真题的练习次数（练习历史按孩子记录）"""
     return sum(
-        1 for record in zhenti_item.get("practice_history") or []
-        if record.get("child_id") == child_id
+        1 for r in zhenti_item.get("practice_history") or []
+        if r.get("child_id") == child_id
     )
+
+
+def matchable_units(item: dict) -> list[dict]:
+    """把一道真题展开为可匹配单元。
+
+    independent → 顶层自身；material_group/passage → 各子题（带父题引用）。
+    每个单元含 knowledge_points / era / module，供知识点与维度匹配。
+    """
+    form = item.get("question_form", "independent")
+    if form == "independent" or not item.get("sub_questions"):
+        return [{
+            "kp": item.get("knowledge_points") or [],
+            "era": item.get("era"),
+            "module": item.get("module"),
+            "sub_number": None,
+        }]
+    return [{
+        "kp": sub.get("knowledge_points") or [],
+        "era": sub.get("era") or item.get("era"),
+        "module": sub.get("module") or item.get("module"),
+        "sub_number": sub.get("number"),
+    } for sub in item["sub_questions"]]
 
 
 def recommend(
@@ -84,39 +101,75 @@ def recommend(
     child_id: str,
     *,
     subject: Optional[str] = None,
+    era: Optional[str] = None,
+    module: Optional[str] = None,
     limit: int = 20,
 ) -> list[dict]:
-    """按薄弱点权重给真题打分排序。
+    """按薄弱点权重给真题打分（子题级匹配）。
 
-    得分 = 命中薄弱点的权重和；
-    同分：该孩子练得少的优先，再按年份新的优先。
-    零分（完全不匹配）的真题不推荐。
+    得分 = 命中薄弱点的权重和（跨子题累加）；
+    同分：该孩子练得少优先，再按年份新优先。零分不推荐。
+    era/module 为专项切片过滤（历史按朝代、政治按主题）。
     """
     weight_by_kp = {w["knowledge_point"]: w["weight"] for w in weak_points}
     scored = []
     for item in zhenti:
         if subject and item.get("subject") != subject:
             continue
-        matched = []
+        matched: list[str] = []
+        matched_subs: list[str] = []
         score = 0.0
-        for raw in item.get("knowledge_points") or []:
-            kp = normalize_kp(raw)
-            if kp in weight_by_kp:
-                matched.append(kp)
-                score += weight_by_kp[kp]
+        for unit in matchable_units(item):
+            if era and unit["era"] != era:
+                continue
+            if module and unit["module"] != module:
+                continue
+            hit = False
+            for raw in unit["kp"]:
+                kp = normalize_kp(raw)
+                if kp in weight_by_kp:
+                    if kp not in matched:
+                        matched.append(kp)
+                    score += weight_by_kp[kp]
+                    hit = True
+            if hit and unit["sub_number"]:
+                matched_subs.append(str(unit["sub_number"]))
         if score <= 0:
             continue
         scored.append({
             **{k: v for k, v in item.items() if not k.startswith("_")},
             "match_score": round(score, 2),
             "matched_points": matched,
+            "matched_sub_numbers": matched_subs,
             "child_practice_count": child_practice_count(item, child_id),
         })
 
-    def sort_key(item: dict):
-        year = str(item.get("year") or "")
-        year_rank = -int(year) if year.isdigit() else 0
-        return (-item["match_score"], item["child_practice_count"], year_rank)
+    def sort_key(x):
+        year = str(x.get("year") or "")
+        return (-x["match_score"], x["child_practice_count"], -int(year) if year.isdigit() else 0)
 
     scored.sort(key=sort_key)
     return scored[:limit]
+
+
+def list_passages(
+    zhenti: list[dict],
+    *,
+    subject: Optional[str] = None,
+    question_type: Optional[str] = None,
+) -> list[dict]:
+    """语篇整题按「题型 + 评级梯度」列出（语文英语整篇练习用）。
+
+    评级排序：简单→中等→较难（难度递进）；同评级年份新优先。
+    """
+    order = {"简单": 0, "中等": 1, "较难": 2}
+    items = [
+        {k: v for k, v in i.items() if not k.startswith("_")}
+        for i in zhenti
+        if i.get("question_form") == "passage"
+        and (not subject or i.get("subject") == subject)
+        and (not question_type or i.get("question_type") == question_type)
+    ]
+    items.sort(key=lambda x: (order.get(x.get("rating") or "中等", 1),
+                              -int(str(x.get("year") or 0)) if str(x.get("year") or "").isdigit() else 0))
+    return items

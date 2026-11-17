@@ -1,30 +1,23 @@
-/** 真题库浏览（v2.0）：筛选、详情、编辑标签、删除 */
+/** 真题库浏览（三形态）：筛选、详情、编辑、删除 */
 
 import { useCallback, useEffect, useState } from 'react'
 import { Search, Trash2, Pencil, X } from 'lucide-react'
 import { useStore } from '../../store/useStore'
-import { fetchZhentiQuestions, fetchZhentiDetail, patchZhenti, deleteZhenti } from '../../api/client'
-import { renderMarkdownWithMath } from '../../utils/mathRenderer'
-import type { ZhentiQuestion } from '../../types'
+import { fetchZhentiQuestions, fetchZhentiDetail, fetchZhentiDimensions, patchZhenti, deleteZhenti } from '../../api/client'
+import ZhentiContent from './ZhentiContent'
+import type { ZhentiQuestion, ZhentiDimensions } from '../../types'
 
 const inputStyle: React.CSSProperties = {
-  background: 'var(--color-surface-2)',
-  border: '1px solid var(--color-border)',
-  borderRadius: 'var(--radius-sm)',
-  color: 'var(--color-text)',
-  padding: '8px 10px',
-  fontSize: '14px',
+  background: 'var(--color-surface-2)', border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)', color: 'var(--color-text)', padding: '8px 10px', fontSize: 14,
 }
-
 const chipStyle: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '2px 10px',
-  borderRadius: 'var(--radius-full)',
-  background: 'var(--color-primary-light)',
-  color: 'var(--color-primary)',
-  fontSize: 12,
-  marginRight: 6,
-  marginBottom: 4,
+  display: 'inline-block', padding: '2px 10px', borderRadius: 'var(--radius-full)',
+  background: 'var(--color-primary-light)', color: 'var(--color-primary)',
+  fontSize: 12, marginRight: 6, marginBottom: 4,
+}
+const FORM_LABEL: Record<string, string> = {
+  independent: '独立小题', material_group: '材料组题', passage: '语篇整题',
 }
 
 export default function ZhentiBank() {
@@ -32,14 +25,22 @@ export default function ZhentiBank() {
   const [subject, setSubject] = useState('')
   const [year, setYear] = useState('')
   const [kp, setKp] = useState('')
+  const [era, setEra] = useState('')
+  const [module, setModule] = useState('')
+  const [qtype, setQtype] = useState('')
+  const [dims, setDims] = useState<ZhentiDimensions>({ eras: [], modules: [], question_types: [], ratings: [] })
   const [items, setItems] = useState<ZhentiQuestion[]>([])
   const [loading, setLoading] = useState(false)
   const [detail, setDetail] = useState<ZhentiQuestion | null>(null)
   const [editing, setEditing] = useState(false)
   const [editKps, setEditKps] = useState('')
-  const [editYear, setEditYear] = useState('')
-  const [editSource, setEditSource] = useState('')
+  const [editRating, setEditRating] = useState('')
   const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    fetchZhentiDimensions(subject || undefined).then(setDims).catch(() => {})
+    setEra(''); setModule(''); setQtype('')
+  }, [subject])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -48,28 +49,23 @@ export default function ZhentiBank() {
       if (subject) params.subject = subject
       if (year.trim()) params.year = year.trim()
       if (kp.trim()) params.knowledge_point = kp.trim()
+      if (era) params.era = era
+      if (module) params.module = module
+      if (qtype) params.question_type = qtype
       const res = await fetchZhentiQuestions(params)
       setItems(res.questions)
-    } catch {
-      setMessage('加载题库失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [subject, year, kp])
+    } catch { setMessage('加载题库失败') } finally { setLoading(false) }
+  }, [subject, year, kp, era, module, qtype])
 
   useEffect(() => { load() }, [load])
 
   const openDetail = async (item: ZhentiQuestion) => {
     try {
       const full = await fetchZhentiDetail(item.id)
-      setDetail(full)
-      setEditing(false)
+      setDetail(full); setEditing(false)
       setEditKps((full.knowledge_points || []).join('，'))
-      setEditYear(full.year || '')
-      setEditSource(full.source || '')
-    } catch {
-      setMessage('加载详情失败')
-    }
+      setEditRating(full.rating || '')
+    } catch { setMessage('加载详情失败') }
   }
 
   const handleSaveEdit = async () => {
@@ -77,27 +73,16 @@ export default function ZhentiBank() {
     try {
       await patchZhenti(detail.id, {
         knowledge_points: editKps.split(/[,，、]/).map(s => s.trim()).filter(Boolean),
-        year: editYear.trim() || undefined,
-        source: editSource.trim() || undefined,
+        rating: editRating || undefined,
       })
-      setMessage('已保存修改')
-      setEditing(false)
-      setDetail(null)
-      load()
-    } catch (e: any) {
-      setMessage(e?.response?.data?.detail || '保存失败')
-    }
+      setMessage('已保存修改'); setEditing(false); setDetail(null); load()
+    } catch (e: any) { setMessage(e?.response?.data?.detail || '保存失败') }
   }
 
   const handleDelete = async (item: ZhentiQuestion) => {
-    if (!window.confirm(`确认删除这道真题？\n${item.source}（${item.year}）第 ${item.number || '?'} 题\n删除后不可恢复。`)) return
-    try {
-      await deleteZhenti(item.id)
-      setDetail(null)
-      load()
-    } catch (e: any) {
-      setMessage(e?.response?.data?.detail || '删除失败')
-    }
+    if (!window.confirm(`确认删除这道真题？\n${item.source}（${item.year}）第 ${item.number || '?'} 题`)) return
+    try { await deleteZhenti(item.id); setDetail(null); load() }
+    catch (e: any) { setMessage(e?.response?.data?.detail || '删除失败') }
   }
 
   return (
@@ -107,21 +92,37 @@ export default function ZhentiBank() {
           <option value="">全部学科</option>
           {availableSubjects.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <input value={year} onChange={e => setYear(e.target.value)} placeholder="年份" style={{ ...inputStyle, width: 90 }} />
-        <div style={{ position: 'relative', flex: 1, minWidth: 180 }}>
+        <input value={year} onChange={e => setYear(e.target.value)} placeholder="年份" style={{ ...inputStyle, width: 80 }} />
+        {dims.eras.length > 0 && (
+          <select value={era} onChange={e => setEra(e.target.value)} style={inputStyle}>
+            <option value="">全部时代</option>
+            {dims.eras.map(e => <option key={e} value={e}>{e}</option>)}
+          </select>
+        )}
+        {dims.modules.length > 0 && (
+          <select value={module} onChange={e => setModule(e.target.value)} style={inputStyle}>
+            <option value="">全部主题</option>
+            {dims.modules.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        )}
+        {dims.question_types.length > 0 && (
+          <select value={qtype} onChange={e => setQtype(e.target.value)} style={inputStyle}>
+            <option value="">全部题型</option>
+            {dims.question_types.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
+        <div style={{ position: 'relative', flex: 1, minWidth: 160 }}>
           <Search size={14} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--color-text-tertiary)' }} />
           <input value={kp} onChange={e => setKp(e.target.value)} placeholder="按知识点搜索…" style={{ ...inputStyle, width: '100%', paddingLeft: 30 }} />
         </div>
-        <span style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>
-          {loading ? '加载中…' : `共 ${items.length} 道`}
-        </span>
+        <span style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>{loading ? '加载中…' : `共 ${items.length} 道`}</span>
       </div>
       {message && <p className="form-error" style={{ marginBottom: 10 }}>{message}</p>}
 
       {items.length === 0 && !loading && (
         <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--color-text-tertiary)' }}>
           <p style={{ fontSize: 15 }}>题库还是空的</p>
-          <p style={{ fontSize: 13 }}>到「导入」标签页上传往年真题卷，AI 会自动拆题标注知识点</p>
+          <p style={{ fontSize: 13 }}>到「导入」标签页上传往年真题卷</p>
         </div>
       )}
 
@@ -135,15 +136,23 @@ export default function ZhentiBank() {
               <span>{item.source}（{item.year}）</span>
               <span>{item.subject} · 第{item.number || '?'}题</span>
             </div>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{item.topic || '未分类'}</div>
+            <div style={{ fontSize: 13, marginBottom: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ ...chipStyle, background: 'var(--color-fill)', color: 'var(--color-text-secondary)' }}>
+                {FORM_LABEL[item.question_form] || '独立小题'}
+              </span>
+              {item.question_type && <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{item.question_type}</span>}
+              {item.rating && <span style={{ fontSize: 12, color: 'var(--color-warning)' }}>评级·{item.rating}</span>}
+              {item.era && <span style={{ ...chipStyle, background: 'var(--color-warning-light)', color: 'var(--color-warning)' }}>{item.era}</span>}
+              {item.module && <span style={{ ...chipStyle, background: 'var(--color-success-light)', color: 'var(--color-success)' }}>{item.module}</span>}
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{item.topic || item.question_type || '未分类'}</div>
             <div style={{ marginBottom: 6 }}>
-              {(item.knowledge_points || []).map(k => <span key={k} style={chipStyle}>{k}</span>)}
+              {(item.knowledge_points || []).slice(0, 4).map(k => <span key={k} style={chipStyle}>{k}</span>)}
+              {item.question_form !== 'independent' && (
+                <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>{item.sub_questions?.length || 0} 个子题</span>
+              )}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', display: 'flex', gap: 12 }}>
-              <span>{item.difficulty}</span>
-              <span>练 {item.practice_count} 次</span>
-              {item.converted_to?.length ? <span>转错题 {item.converted_to.length}</span> : null}
-            </div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>练 {item.practice_count} 次</div>
           </div>
         ))}
       </div>
@@ -155,64 +164,51 @@ export default function ZhentiBank() {
         }}>
           <div onClick={e => e.stopPropagation()} style={{
             background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
-            maxWidth: 720, width: '100%', maxHeight: '85vh', overflow: 'auto', padding: 24,
+            maxWidth: 760, width: '100%', maxHeight: '85vh', overflow: 'auto', padding: 24,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: 16 }}>
                 {detail.source}（{detail.year}）第 {detail.number || '?'} 题
+                <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--color-text-tertiary)', marginLeft: 8 }}>
+                  {FORM_LABEL[detail.question_form]} {detail.question_type} {detail.rating && `· ${detail.rating}`}
+                </span>
               </h3>
-              <button onClick={() => setDetail(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)' }}>
-                <X size={18} />
-              </button>
+              <button onClick={() => setDetail(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)' }}><X size={18} /></button>
             </div>
 
             {editing ? (
-              <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+              <div style={{ display: 'grid', gap: 10, marginBottom: 14 }}>
                 <label style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
-                  知识点（逗号分隔，与错题标签一致才能匹配推荐）
+                  顶层知识点（逗号分隔）
                   <input value={editKps} onChange={e => setEditKps(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }} />
                 </label>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <label style={{ fontSize: 13, color: 'var(--color-text-secondary)', flex: 1 }}>
-                    年份
-                    <input value={editYear} onChange={e => setEditYear(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }} />
+                {detail.question_form === 'passage' && (
+                  <label style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
+                    难度评级
+                    <select value={editRating} onChange={e => setEditRating(e.target.value)} style={{ ...inputStyle, marginTop: 4 }}>
+                      <option value="">未评</option><option>简单</option><option>中等</option><option>较难</option>
+                    </select>
                   </label>
-                  <label style={{ fontSize: 13, color: 'var(--color-text-secondary)', flex: 2 }}>
-                    来源
-                    <input value={editSource} onChange={e => setEditSource(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }} />
-                  </label>
-                </div>
+                )}
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={handleSaveEdit} style={{ padding: '8px 16px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 14 }}>保存</button>
-                  <button onClick={() => setEditing(false)} style={{ padding: '8px 16px', background: 'var(--color-surface-2)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 14 }}>取消</button>
+                  <button onClick={handleSaveEdit} style={{ padding: '8px 16px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>保存</button>
+                  <button onClick={() => setEditing(false)} style={{ padding: '8px 16px', background: 'var(--color-surface-2)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>取消</button>
                 </div>
               </div>
             ) : (
               <div style={{ marginBottom: 12 }}>
+                {detail.era && <span style={{ ...chipStyle, background: 'var(--color-warning-light)', color: 'var(--color-warning)' }}>时代·{detail.era}</span>}
+                {detail.module && <span style={{ ...chipStyle, background: 'var(--color-success-light)', color: 'var(--color-success)' }}>主题·{detail.module}</span>}
                 {(detail.knowledge_points || []).map(k => <span key={k} style={chipStyle}>{k}</span>)}
-                <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginLeft: 8 }}>{detail.difficulty} · {detail.topic}</span>
               </div>
             )}
 
-            <div style={{ fontSize: 15, lineHeight: 1.8, marginBottom: 14 }}
-              dangerouslySetInnerHTML={{ __html: renderMarkdownWithMath(detail._question || detail._body || '') }} />
-            <details open style={{ marginBottom: 10 }}>
-              <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14, color: 'var(--color-success)' }}>参考答案</summary>
-              <div style={{ fontSize: 14, lineHeight: 1.8, marginTop: 6 }}
-                dangerouslySetInnerHTML={{ __html: renderMarkdownWithMath(detail._answer || '（无）') }} />
-            </details>
-            {detail._solution && (
-              <details style={{ marginBottom: 14 }}>
-                <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14, color: 'var(--color-text-secondary)' }}>解题分析</summary>
-                <div style={{ fontSize: 14, lineHeight: 1.8, marginTop: 6 }}
-                  dangerouslySetInnerHTML={{ __html: renderMarkdownWithMath(detail._solution) }} />
-              </details>
-            )}
+            <ZhentiContent item={detail} revealed={true} />
 
-            <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--color-border)', paddingTop: 12 }}>
+            <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--color-border)', paddingTop: 12, marginTop: 12 }}>
               {!editing && (
                 <button onClick={() => setEditing(true)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '7px 14px', background: 'var(--color-surface-2)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13 }}>
-                  <Pencil size={13} /> 编辑标签
+                  <Pencil size={13} /> 编辑
                 </button>
               )}
               <button onClick={() => handleDelete(detail)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '7px 14px', background: 'var(--color-error-light)', color: 'var(--color-error)', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13 }}>
@@ -220,7 +216,7 @@ export default function ZhentiBank() {
               </button>
               <span style={{ flex: 1 }} />
               <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)', alignSelf: 'center' }}>
-                练习 {detail.practice_count} 次 · 对 {detail.correct_count} / 错 {detail.wrong_count}
+                练 {detail.practice_count} · 对 {detail.correct_count} / 错 {detail.wrong_count}
               </span>
             </div>
           </div>

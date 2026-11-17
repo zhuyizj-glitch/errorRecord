@@ -48,25 +48,45 @@ def _generate_filename(zhenti_id: str, frontmatter: dict, subject: str) -> str:
 
 
 def build_body(item: dict) -> str:
-    """真题正文模板。
+    """真题正文模板（按形态渲染，供 Obsidian 阅读）。
 
-    段标题用「原题 / 参考答案 / 解题分析」，
-    与 body_parser.SECTION_ALIASES 兼容，decorate_with_sections 可直接复用。
+    结构化数据（子题、标签）存在 frontmatter，正文是人类可读渲染。
+    段标题与 body_parser.SECTION_ALIASES 兼容。
     """
+    form = item.get("question_form", "independent")
+
+    if form in ("material_group", "passage"):
+        parts = []
+        label = "语篇" if form == "passage" else "共享材料"
+        parts += [f"## {label}", "", item.get("passage") or "（无）"]
+        if item.get("has_diagram") and item.get("diagram_description"):
+            parts += ["", f"> **图形描述**：{item['diagram_description']}"]
+        subs = item.get("sub_questions") or []
+        if subs:
+            parts += ["", "## 子题"]
+            for i, sub in enumerate(subs, 1):
+                num = sub.get("number") or str(i)
+                parts += ["", f"### 第 {num} 题", "",
+                          f"> **题目内容**：{sub.get('question_text', '')}", "",
+                          f"**参考答案**：{sub.get('correct_answer', '') or '（待补充）'}"]
+                if sub.get("solution_steps"):
+                    parts += ["", f"**解析**：{sub['solution_steps']}"]
+        return "\n".join(parts)
+
+    # independent
     parts = ["## 原题", "", f"> **题目内容**：{item.get('question_text', '')}"]
     if item.get("has_diagram") and item.get("diagram_description"):
         parts += ["", f"> **图形描述**：{item['diagram_description']}"]
     parts += ["", "## 参考答案", "", item.get("correct_answer", "") or "（待补充）"]
-    solution = item.get("solution_steps")
-    if solution:
-        parts += ["", "## 解题分析", "", solution]
+    if item.get("solution_steps"):
+        parts += ["", "## 解题分析", "", item["solution_steps"]]
     return "\n".join(parts)
 
 
 def new_frontmatter(
     zhenti_id: str, account_id: str, subject: str, year: str, source: str, item: dict
 ) -> dict:
-    """新真题的初始 frontmatter（练习计数全部从零开始）"""
+    """新真题的初始 frontmatter（练习计数从零开始，含三形态与组织轴字段）"""
     return {
         "id": zhenti_id,
         "account_id": account_id,
@@ -74,11 +94,18 @@ def new_frontmatter(
         "year": year,
         "source": source,
         "number": item.get("number") or "",
+        "question_form": item.get("question_form", "independent"),
+        "question_type": item.get("question_type"),
+        "rating": item.get("rating"),
         "topic": item.get("topic") or "",
         "knowledge_points": item.get("knowledge_points") or [],
+        "era": item.get("era"),
+        "module": item.get("module"),
         "difficulty": item.get("difficulty") or "中等",
         "has_diagram": bool(item.get("has_diagram")),
         "diagram_description": item.get("diagram_description"),
+        "passage": item.get("passage"),
+        "sub_questions": item.get("sub_questions") or [],
         "created_at": timeutil.today().isoformat(),
         "practice_count": 0,
         "correct_count": 0,

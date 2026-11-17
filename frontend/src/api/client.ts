@@ -60,8 +60,10 @@ export default api
 export const importZhenti = (data: any) => api.post('/zhenti/import', data).then(r => r.data)
 export const fetchZhentiTasks = () => api.get('/zhenti/tasks').then(r => r.data)
 export const saveZhentiQuestions = (data: any) => api.post('/zhenti/questions', data).then(r => r.data)
-export const fetchZhentiQuestions = (params?: { subject?: string; year?: string; knowledge_point?: string }) =>
+export const fetchZhentiQuestions = (params?: { subject?: string; year?: string; knowledge_point?: string; era?: string; module?: string; question_form?: string; question_type?: string }) =>
   api.get('/zhenti/questions', { params }).then(r => r.data)
+export const fetchZhentiDimensions = (subject?: string) =>
+  api.get('/zhenti/dimensions', { params: { subject } }).then(r => r.data)
 export const fetchZhentiDetail = (id: string) => api.get(`/zhenti/questions/${id}`).then(r => r.data)
 export const patchZhenti = (id: string, data: any) => api.patch(`/zhenti/questions/${id}`, data).then(r => r.data)
 export const deleteZhenti = (id: string) => api.delete(`/zhenti/questions/${id}`).then(r => r.data)
@@ -69,5 +71,5 @@ export const practiceZhenti = (id: string, data: any) => api.post(`/zhenti/quest
 export const zhentiToMistake = (id: string, data: any) => api.post(`/zhenti/questions/${id}/to-mistake`, data).then(r => r.data)
 export const fetchWeakPoints = (childId: string, subject?: string) =>
   api.get('/zhenti/weak-points', { params: { child_id: childId, subject } }).then(r => r.data)
-export const fetchZhentiRecommend = (childId: string, subject?: string) =>
-  api.get('/zhenti/recommend', { params: { child_id: childId, subject } }).then(r => r.data)
+export const fetchZhentiRecommend = (childId: string, subject?: string, extra?: { era?: string; module?: string; question_type?: string }) =>
+  api.get('/zhenti/recommend', { params: { child_id: childId, subject, ...extra } }).then(r => r.data)

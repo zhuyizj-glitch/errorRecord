@@ -322,11 +322,11 @@ async def _post_chat(llm_settings: LLMSettings, payload: dict) -> dict:
         raise ValueError(f"LLM 返回的不是有效 JSON (error: {e}):\n{reply[:500]}")
 
 
-async def analyze_exam_images(image_paths: list[Path], vocab: list[str]) -> dict:
+async def analyze_exam_images(image_paths: list[Path], vocab: list[str], subject: str = "") -> dict:
     """分析真题卷图片（空白卷，无学生作答）。
 
-    vocab：库内已有知识点词汇表，注入提示词让 AI 尽量复用标签，
-    提高与错题薄弱点的匹配率。
+    vocab：库内已有知识点词汇表，注入提示词让 AI 尽量复用标签。
+    subject：学科，决定分学科形态规则（历史时代轴/政治主题轴/语文英语语篇整题）。
     """
     from app.core.prompts import build_exam_prompt
 
@@ -344,7 +344,7 @@ async def analyze_exam_images(image_paths: list[Path], vocab: list[str]) -> dict
     payload = {
         "model": llm_settings.model,
         "messages": [
-            {"role": "system", "content": build_exam_prompt(vocab)},
+            {"role": "system", "content": build_exam_prompt(subject, vocab)},
             {"role": "user", "content": content},
         ],
         "temperature": 0.3,
