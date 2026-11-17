@@ -61,7 +61,13 @@ class ImaAccountScopeTest(unittest.IsolatedAsyncioTestCase):
         stats = await self.storage.sync_to_obsidian(files, {("acc_1", "child_1")})
 
         self.assertEqual([item["question_id"] for item in files.saved], ["q1"])
-        self.assertEqual(stats, {"created": 1, "updated": 0, "skipped": 1, "errors": 1})
+        self.assertEqual(
+            stats,
+            {
+                "created": 1, "updated": 0, "forced": 0, "skipped": 1, "unchanged": 0,
+                "preskipped": 0, "conflicts": 0, "errors": 1, "pruned": 0, "local_only": 0,
+            },
+        )
 
 
 if __name__ == "__main__":

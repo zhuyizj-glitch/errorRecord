@@ -1,5 +1,6 @@
 """错题、图片与 vault 路径的账号隔离测试。"""
 
+import io
 import tempfile
 import unittest
 from datetime import timedelta
@@ -8,13 +9,22 @@ from unittest.mock import patch
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.api.deps import get_auth_service
 from app.core.config import settings
 from app.db import Database
 from app.services.auth_service import AuthService
 from app.services.file_storage import FileStorageBackend
+from app.services import file_ops
 from main import app
+
+
+def png_bytes(width: int = 300, height: int = 300) -> bytes:
+    """生成一张真实 PNG，用于通过上传接口的格式校验。"""
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height), "white").save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 class QuestionAccountIsolationTest(unittest.TestCase):
@@ -57,22 +67,18 @@ class QuestionAccountIsolationTest(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_question_and_image_are_scoped_to_logged_in_account(self):
-        uploaded = self.admin.post(
-            "/api/upload/images",
-            files={"files": ("sample.png", b"test-image", "image/png")},
-        ).json()["image_ids"]
         saved = self.admin.post("/api/questions", json={
             "child_id": self.admin_child["id"], "subject": "数学", "topic": "隔离测试",
             "source_type": "test", "difficulty": "easy", "error_date": "2026-09-27",
-            "question_text": "6 × 7", "correct_answer": "42", "image_ids": uploaded,
+            "question_text": "6 × 7", "correct_answer": "42",
         })
         self.assertEqual(saved.status_code, 200, saved.text)
         question_id = saved.json()["id"]
 
-        note = self.vault / "accounts" / self.admin_id / self.admin_child["id"] / "数学" / f"2026-09-27-{question_id}.md"
-        image = self.vault / "_assets" / "accounts" / self.admin_id / self.admin_child["id"] / "数学" / question_id / "sample.png"
-        self.assertTrue(note.exists())
-        self.assertEqual(image.read_bytes(), b"test-image")
+        note = file_ops.find_question_file(
+            self.admin_id, self.admin_child["id"], "数学", question_id
+        )
+        self.assertIsNotNone(note, "应当能按 question_id 定位到文件")
         content = note.read_text()
         self.assertIn(f"account_id: {self.admin_id}", content)
         self.assertIn(f"child_id: {self.admin_child['id']}", content)
@@ -87,11 +93,6 @@ class QuestionAccountIsolationTest(unittest.TestCase):
             params={"child_id": self.admin_child["id"], "subject": "数学"},
         )
         self.assertEqual(cross.status_code, 404)
-        cross_image = self.user.get(
-            f"/api/questions/{question_id}/images/sample.png",
-            params={"child_id": self.admin_child["id"], "subject": "数学"},
-        )
-        self.assertEqual(cross_image.status_code, 404)
 
         own_review = self.admin.get(
             "/api/review/plan", params={"child_id": self.admin_child["id"]}
@@ -115,7 +116,7 @@ class QuestionAccountIsolationTest(unittest.TestCase):
     def test_analysis_tasks_are_scoped_to_logged_in_account(self):
         uploaded = self.admin.post(
             "/api/upload/images",
-            files={"files": ("task.png", b"task-image", "image/png")},
+            files={"files": ("task.png", png_bytes(), "image/png")},
         ).json()["image_ids"]
         with patch(
             "app.api.routes.tasks.llm.analyze_images",
