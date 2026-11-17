@@ -9,6 +9,12 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# IMA 对短时间内的密集调用会限频。批量读取（列表、同步、重建）很容易撞上，
+# 因为它要逐条拉取笔记正文。遇到限频时按指数退避重试，而不是直接失败。
+_RATE_LIMIT_MARKERS = ("频率超限", "限频", "rate limit", "too many requests")
+_MAX_RETRIES = 4
+_RETRY_BASE_SECONDS = 2.0
+
 
 class IMAClient:
     """IMA API 客户端 - 通过 ima-skills skill 调用"""
@@ -29,45 +35,61 @@ class IMAClient:
             logger.error(f"读取凭证失败: {e}")
             raise
 
+    @staticmethod
+    def _is_rate_limited(message: str) -> bool:
+        lowered = message.lower()
+        return any(marker in message or marker in lowered for marker in _RATE_LIMIT_MARKERS)
+
     async def _call_api(self, endpoint: str, payload: dict) -> dict:
-        """调用 IMA API"""
-        try:
-            client_id, api_key = self._get_credentials()
-            # 凭证 + 更新检查时间戳位置（凭证目录只读，需重定向到可写路径）
-            opts = json.dumps({
-                "clientId": client_id,
-                "apiKey": api_key,
-                "lastCheckFile": "/tmp/ima_last_update_check",
-            })
+        """
+        调用 IMA API。
 
-            # 调用 ima_api.cjs 脚本
-            proc = await asyncio.create_subprocess_exec(
-                "node", str(self.ima_api_script),
-                endpoint, json.dumps(payload), opts,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+        限频（业务错误码里带「请求频率超限」）会自动退避重试——批量操作时
+        这是常态而不是异常，直接失败会让同步中途断掉并且看不出原因。
+        """
+        client_id, api_key = self._get_credentials()
+        opts = json.dumps({
+            "clientId": client_id,
+            "apiKey": api_key,
+            "lastCheckFile": "/tmp/ima_last_update_check",
+        })
 
-            stdout, stderr = await proc.communicate()
+        last_error = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "node", str(self.ima_api_script),
+                    endpoint, json.dumps(payload), opts,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await proc.communicate()
 
-            if proc.returncode != 0:
-                error_msg = stderr.decode('utf-8')
-                logger.error(f"API 调用失败: {error_msg}")
-                raise Exception(f"API 调用失败: {error_msg}")
+                if proc.returncode != 0:
+                    error_msg = stderr.decode("utf-8")
+                    raise Exception(f"API 调用失败: {error_msg}")
 
-            response = json.loads(stdout.decode('utf-8'))
+                response = json.loads(stdout.decode("utf-8"))
+                if response.get("code") != 0:
+                    raise Exception(f"IMA 业务错误: {response.get('msg', '未知错误')}")
 
-            # 检查业务错误
-            if response.get("code") != 0:
-                error_msg = response.get("msg", "未知错误")
-                logger.error(f"IMA 业务错误: {error_msg}")
-                raise Exception(f"IMA 业务错误: {error_msg}")
+                return response.get("data", {})
 
-            return response.get("data", {})
+            except Exception as e:
+                last_error = e
+                message = str(e)
+                if attempt < _MAX_RETRIES and self._is_rate_limited(message):
+                    delay = _RETRY_BASE_SECONDS * (2 ** attempt)
+                    logger.warning(
+                        f"IMA 限频，{delay:.0f} 秒后重试 "
+                        f"({endpoint}，第 {attempt + 1}/{_MAX_RETRIES} 次)"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error(f"IMA API 调用异常: {message}")
+                raise
 
-        except Exception as e:
-            logger.error(f"IMA API 调用异常: {e}")
-            raise
+        raise last_error or Exception("IMA API 调用失败")
 
     async def create_note(self, title: str, content: str, tags: list[str] = None) -> Optional[str]:
         """
@@ -490,23 +512,33 @@ class IMAClient:
             logger.error(f"IMA 笔记获取异常: {e}")
             return None
 
-    async def upload_image(self, image_data: bytes, filename: str) -> Optional[str]:
+    async def append_to_note(self, note_id: str, content: str) -> bool:
         """
-        上传图片到 IMA
+        向已有笔记追加内容（append_doc）。
 
-        注意: IMA API 可能不直接支持图片上传，
-        这个方法暂时返回 None，实际使用时可能需要将图片
-        转换为 base64 嵌入到笔记内容中。
+        IMA 没有修改笔记的接口，追加是唯一的写入方式。注意它会**不可撤销地**
+        修改笔记，且只能往末尾加、不能替换已有内容。
 
         Args:
-            image_data: 图片二进制数据
-            filename: 文件名
+            note_id: 目标笔记 ID
+            content: 要追加的 Markdown 内容
 
         Returns:
-            Optional[str]: 图片 URL 或 ID，失败返回 None
+            是否追加成功
         """
-        logger.warning("IMA API 图片上传功能暂未实现，建议使用 base64 嵌入")
-        return None
+        try:
+            content = self._ensure_utf8(content)
+            payload = {
+                "note_id": note_id,
+                "content": content,
+                "content_format": 1,  # 1 = markdown
+            }
+            await self._call_api("openapi/note/v1/append_doc", payload)
+            return True
+
+        except Exception as e:
+            logger.error(f"IMA 追加内容异常: {e}")
+            return False
 
     async def close(self):
         """关闭客户端（无需操作，因为使用 subprocess）"""

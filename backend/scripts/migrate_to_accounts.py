@@ -157,35 +157,48 @@ def migrate_local_vault(
     return result
 
 
-async def migrate_ima_notes(
+async def audit_ima_notes(
     storage: IMAStorageBackend,
     admin_id: str,
     child_ids: dict[str, str],
-    dry_run: bool = True,
 ) -> dict:
-    result = {"matched": 0, "updated": 0, "errors": []}
+    """
+    审计 IMA 中需要补账号元数据的旧笔记。
+
+    ⚠️ 本函数**只统计，不写入**。原因：IMA OpenAPI 没有修改笔记的接口，
+    可用能力只有 import_doc（新建）、append_doc（追加）、get_doc_content
+    （读取）、list_note_by_folder_id（列表）、search_note_book（搜索）、
+    list_note_folder_by_cursor（列笔记本）。append_doc 只能往末尾追加，
+    用它补字段会在笔记里留下第二份元数据块，破坏解析。
+
+    影响：这些旧笔记在同步时会被判为「归属未知」而跳过
+    （见 IMAStorageBackend.sync_to_obsidian 的 allowed_scopes 检查）。
+    题目内容本身仍完整保存在 IMA 里，需要时可在 IMA 客户端手动整理。
+    """
+    result = {
+        "matched": 0,
+        "updated": 0,
+        "unsupported_reason": "IMA OpenAPI 不支持修改笔记，无法补齐账号元数据",
+        "affected_notes": [],
+    }
     for note in await storage.client.list_notes():
         note_id = note.get("id")
         if not note_id:
             continue
         try:
             note_data = await storage.client.get_note(note_id)
-            frontmatter, body = storage._parse_note_content(note_data.get("content", ""))
+            frontmatter, _ = storage._parse_note_content(note_data.get("content", ""))
             legacy = frontmatter.get("child")
             if frontmatter.get("account_id") or legacy not in child_ids:
                 continue
             result["matched"] += 1
-            frontmatter.pop("child", None)
-            frontmatter["account_id"] = admin_id
-            frontmatter["child_id"] = child_ids[legacy]
-            frontmatter["child_name"] = LEGACY_CHILDREN[legacy][0]
-            if not dry_run:
-                updated = await storage.update_question(note_id, frontmatter, body)
-                if not updated:
-                    raise RuntimeError("IMA 更新失败")
-                result["updated"] += 1
+            result["affected_notes"].append({
+                "note_id": note_id,
+                "question_id": frontmatter.get("id"),
+                "legacy_child": legacy,
+            })
         except Exception as exc:
-            result["errors"].append({"note_id": note_id, "error": str(exc)})
+            result.setdefault("errors", []).append({"note_id": note_id, "error": str(exc)})
     return result
 
 
@@ -212,9 +225,7 @@ def main() -> None:
             if name in by_name
         }
         result["ima"] = asyncio.run(
-            migrate_ima_notes(
-                IMAStorageBackend(), args.admin_id, child_ids, dry_run=not args.apply
-            )
+            audit_ima_notes(IMAStorageBackend(), args.admin_id, child_ids)
         )
     print(yaml.safe_dump(result, allow_unicode=True, sort_keys=False))
 

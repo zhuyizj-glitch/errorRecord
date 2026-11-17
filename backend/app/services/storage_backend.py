@@ -1,7 +1,10 @@
-"""存储后端抽象接口"""
+"""存储后端抽象接口
+
+注意：接口中不包含图片相关的操作。原始图片只是 LLM 分析的输入，
+不落盘、不进 markdown，因此存储层只需处理纯文字内容。
+"""
 
 from typing import Protocol, Optional
-from datetime import date
 
 
 class StorageBackend(Protocol):
@@ -15,21 +18,20 @@ class StorageBackend(Protocol):
         subject: str,
         frontmatter: dict,
         body: str,
-        images: list[tuple[bytes, str]] = None,
     ) -> str:
         """
         保存错题
 
         Args:
             question_id: 错题 ID
-            child: 孩子标识
+            account_id: 账号 ID
+            child_id: 孩子 ID
             subject: 学科
-            frontmatter: YAML frontmatter 数据
-            body: Markdown 正文
-            images: 图片列表 [(图片数据, 文件名)]
+            frontmatter: 元数据
+            body: Markdown 正文（纯文字）
 
         Returns:
-            存储 ID（可能是文件路径、数据库 ID 等）
+            存储 ID（文件路径或云端笔记 ID）
         """
         ...
 
@@ -43,11 +45,12 @@ class StorageBackend(Protocol):
         列出错题
 
         Args:
-            child: 孩子标识
+            account_id: 账号 ID
+            child_id: 孩子 ID
             subject: 学科（可选）
 
         Returns:
-            错题列表，每项包含 frontmatter 数据
+            错题列表，每项包含元数据
         """
         ...
 
@@ -59,7 +62,7 @@ class StorageBackend(Protocol):
             storage_id: 存储 ID
 
         Returns:
-            错题数据（frontmatter + body）
+            错题数据（元数据 + 正文）
         """
         ...
 
@@ -74,7 +77,7 @@ class StorageBackend(Protocol):
 
         Args:
             storage_id: 存储 ID
-            frontmatter: 更新后的 frontmatter
+            frontmatter: 更新后的元数据
             body: 更新后的正文（可选）
 
         Returns:
@@ -91,30 +94,5 @@ class StorageBackend(Protocol):
 
         Returns:
             是否删除成功
-        """
-        ...
-
-    async def get_image_url(self, storage_id: str, filename: str) -> Optional[str]:
-        """
-        获取图片访问 URL
-
-        Args:
-            storage_id: 存储 ID
-            filename: 文件名
-
-        Returns:
-            图片 URL，如果存储不支持则返回 None
-        """
-        ...
-
-    async def sync_from(self, source: "StorageBackend") -> dict:
-        """
-        从另一个存储后端同步数据
-
-        Args:
-            source: 源存储后端
-
-        Returns:
-            同步统计 {created: int, updated: int, deleted: int}
         """
         ...
