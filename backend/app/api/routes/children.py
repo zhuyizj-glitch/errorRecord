@@ -101,13 +101,19 @@ def update_child(
 ):
     now = datetime.now(timezone.utc).isoformat()
     with auth.db.transaction() as connection:
-        updated = connection.execute(
+        previous = connection.execute(
+            "SELECT name FROM children WHERE id = ? AND account_id = ?",
+            (child_id, account.id),
+        ).fetchone()
+        if not previous:
+            raise HTTPException(status_code=404, detail="孩子不存在")
+        previous_name = previous["name"]
+
+        connection.execute(
             "UPDATE children SET name = ?, emoji = ?, updated_at = ? "
             "WHERE id = ? AND account_id = ?",
             (req.name, req.emoji, now, child_id, account.id),
         )
-        if updated.rowcount != 1:
-            raise HTTPException(status_code=404, detail="孩子不存在")
         connection.execute("UPDATE child_subjects SET enabled = 0 WHERE child_id = ?", (child_id,))
         for subject in req.subjects:
             connection.execute(
@@ -118,4 +124,11 @@ def update_child(
         result = _read_child(connection, child_id, account.id)
     for subject in req.subjects:
         file_ops.ensure_subject_dir(account.id, child_id, subject)
+
+    # 文件名和 frontmatter 里都存了人名，改名后需要同步刷新，
+    # 否则文件名会一直停留在旧名字上。
+    if req.name != previous_name:
+        renamed = file_ops.rename_questions_for_child(account.id, child_id, req.name)
+        result["renamed_files"] = renamed
+
     return result

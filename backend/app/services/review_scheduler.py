@@ -1,6 +1,14 @@
-"""间隔复习计划计算"""
+"""间隔复习计划计算
+
+⚠️ 「今天」一律用 timeutil.today()（北京时间），不要用 date.today()。
+   后端跑在 Docker 容器里，容器默认 UTC；北京时间 00:00–08:00 之间
+   date.today() 会得到前一天，导致那段时间的复习计划错算。
+   详见 app/core/timeutil.py 的说明。
+"""
 
 from datetime import date, timedelta
+
+from app.core import timeutil
 
 
 def calculate_next_review(mastery_level: str, redo_result: str, current_interval: int) -> tuple[date, int]:
@@ -25,13 +33,13 @@ def calculate_next_review(mastery_level: str, redo_result: str, current_interval
         else:
             interval = 3
 
-    next_date = date.today() + timedelta(days=interval)
+    next_date = timeutil.today() + timedelta(days=interval)
     return next_date, interval
 
 
 def get_review_plan(questions: list[dict]) -> list[dict]:
     """筛选今日待复习的错题，按优先级排序"""
-    today = date.today()
+    today = timeutil.today()
     due = []
 
     for q in questions:

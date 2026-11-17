@@ -15,6 +15,15 @@ from app.services import llm
 
 router = APIRouter()
 
+# 串行锁：保证同一时间只跑一个 AI 分析。
+#
+# 多图上传时前端会为**每张图各建一个任务**（这样完成一张就能立刻看到一张的结果）。
+# 若它们并发执行，会同时向 AI 服务发多个请求 —— 可能触发限流、也可能互相拖慢。
+# 串起来跑更稳，而且用户本来就想一张一张看到结果。
+#
+# 单进程 uvicorn 下 asyncio.Lock 就够；将来若改成多 worker，需要换成外部队列。
+_analysis_lock = asyncio.Lock()
+
 
 class CreateTaskRequest(BaseModel):
     child_id: str
@@ -51,13 +60,14 @@ def _owned_task(task_id: str, account_id: str):
 
 
 async def _run_analysis(task_id: str, image_paths: list[Path]):
-    """后台执行 AI 分析"""
-    try:
-        await task_manager.update_status(task_id, TaskStatus.PROCESSING)
-        result = await llm.analyze_images(image_paths)
-        await task_manager.update_status(task_id, TaskStatus.COMPLETED, result=result)
-    except Exception as e:
-        await task_manager.update_status(task_id, TaskStatus.FAILED, error=str(e))
+    """后台执行 AI 分析（串行：同一时间只跑一个）"""
+    async with _analysis_lock:
+        try:
+            await task_manager.update_status(task_id, TaskStatus.PROCESSING)
+            result = await llm.analyze_images(image_paths)
+            await task_manager.update_status(task_id, TaskStatus.COMPLETED, result=result)
+        except Exception as e:
+            await task_manager.update_status(task_id, TaskStatus.FAILED, error=str(e))
 
 
 @router.post("/tasks")
@@ -122,13 +132,14 @@ async def delete_task(task_id: str, account: Account = Depends(get_active_accoun
 
 
 async def _run_refine(task_id: str, image_paths: list[Path], feedback: str, current_result: dict):
-    """后台执行反馈优化"""
-    try:
-        await task_manager.update_status(task_id, TaskStatus.PROCESSING)
-        result = await llm.refine_analysis(image_paths, feedback, current_result)
-        await task_manager.update_status(task_id, TaskStatus.COMPLETED, result=result)
-    except Exception as e:
-        await task_manager.update_status(task_id, TaskStatus.FAILED, error=str(e))
+    """后台执行反馈优化（与普通分析共用同一把锁，所以也是串行的）"""
+    async with _analysis_lock:
+        try:
+            await task_manager.update_status(task_id, TaskStatus.PROCESSING)
+            result = await llm.refine_analysis(image_paths, feedback, current_result)
+            await task_manager.update_status(task_id, TaskStatus.COMPLETED, result=result)
+        except Exception as e:
+            await task_manager.update_status(task_id, TaskStatus.FAILED, error=str(e))
 
 
 @router.post("/tasks/{task_id}/refine")

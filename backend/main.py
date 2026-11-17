@@ -21,6 +21,9 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时
     database.initialize()
+    # 回收上次运行遗留的临时图片（保存流程已不负责清理）
+    from app.api.routes.upload import sweep_expired_uploads
+    sweep_expired_uploads()
     if settings.ima_enabled:
         start_scheduler()
     yield

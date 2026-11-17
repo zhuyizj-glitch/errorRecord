@@ -1,24 +1,20 @@
 """错题 CRUD 接口"""
 
-import logging
 import uuid
 from datetime import date
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
 
+from app.core import timeutil
 from app.models.question import QuestionCreate, RedoRequest
 from app.services import file_ops, analyzer, llm
 from app.services.review_scheduler import calculate_next_review
-from app.core.config import settings
 from app.api.routes.upload import TEMP_DIR
 from app.api.deps import get_active_account, get_auth_service
 from app.models.auth import Account
 from app.services.auth_service import AuthService
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -39,6 +35,35 @@ def _get_child(auth: AuthService, account_id: str, child_id: str, subject: str |
     if not child:
         raise HTTPException(status_code=404, detail="孩子或课程不存在")
     return child
+
+
+def _find_local_question(
+    account_id: str, child_id: str, subject: str, question_id: str
+) -> dict:
+    """在本地缓存里按 id 找错题，找不到抛 404。"""
+    for q in file_ops.list_questions(account_id, child_id, subject):
+        if q.get("id") == question_id:
+            return q
+    raise HTTPException(status_code=404, detail="错题不存在")
+
+
+async def _load_for_update(
+    storage, account_id: str, child_id: str, subject: str, question_id: str
+) -> tuple[dict, str]:
+    """
+    读取待修改的错题，返回 (元数据, 正文)。
+
+    可变状态以 IMA 为准：本地是缓存，可能落后（例如你在 IMA 客户端直接改过笔记）。
+    读不到云端时退回本地缓存，保证断网也能操作。
+    """
+    target = _find_local_question(account_id, child_id, subject, question_id)
+    data = await storage.read_authoritative(target.get("ima_note_id"))
+    if data is None:
+        data = file_ops.read_question(target["_file"])
+    data.pop("_file", None)
+    data.pop("_storage_id", None)
+    body = data.pop("_body", "")
+    return data, body
 
 
 @router.post("/analyze")
@@ -73,18 +98,9 @@ async def create_question(
     question_id = uuid.uuid4().hex[:8]
     child = _get_child(auth, account.id, q.child_id, q.subject)
 
-    # 读取上传的临时图片
-    images: list[tuple[bytes, str]] = []
-    for img in q.image_ids:
-        src = Path(img.path).resolve()
-        if (src.parent != (TEMP_DIR / account.id).resolve() or src.stem != img.id
-                or not src.is_file() or Path(img.filename).name != img.filename):
-            raise HTTPException(status_code=400, detail="上传图片无效或已过期，请重新上传")
-        try:
-            images.append((src.read_bytes(), img.filename))
-        except Exception as e:
-            logger.error(f"读取临时图片失败 {img.path}: {e}")
-            raise HTTPException(status_code=400, detail="读取上传图片失败，请重新上传") from e
+    # 注意：原始图片不落盘、不进 markdown。
+    # 图片只是 LLM 分析的输入，分析结果（题目、答案、解题过程、错因、
+    # 图形文字描述）才是要长期保存的内容。临时文件由 upload 模块按 TTL 回收。
 
     # 构建 frontmatter（新错题初始掌握度为 0）
     mastery_score = 0  # 新错题还没重做过，初始为 0
@@ -102,7 +118,7 @@ async def create_question(
         "source_type": q.source_type,
         "difficulty": q.difficulty,
         "error_date": q.error_date.isoformat(),
-        "created_at": date.today().isoformat(),
+        "created_at": timeutil.today().isoformat(),
         "redo_count": 0,
         "correct_count": 0,      # 重做做对次数
         "wrong_count": 0,        # 重做做错次数
@@ -113,7 +129,7 @@ async def create_question(
         "repeat_streak": 0,
         "max_repeat_streak": 0,
         "repeat_pattern": False,
-        "next_review_date": date.today().isoformat(),
+        "next_review_date": timeutil.today().isoformat(),
         "review_interval_days": 1,
         "total_reviews": 0,
         "error_suggestion": q.error_suggestion,
@@ -121,14 +137,8 @@ async def create_question(
         "tags": q.tags,
     }
 
-    # 构建 body
-    # 图片引用用相对路径，指向 _assets/{child}/{subject}/{question_id}/{filename}
-    # Markdown 文件在 {child}/{subject}/ 目录下，所以需要 ../../_assets/ 才能到 vault 根目录
+    # 构建 body（纯文字：题目、答案、解题过程、错因分析、家长备注）
     body_parts = ["## 原题\n"]
-    for _, filename in images:
-        body_parts.append(
-            f"![原题](../../../../_assets/accounts/{account.id}/{q.child_id}/{q.subject}/{question_id}/{filename})\n"
-        )
     if q.question_text:
         body_parts.append(f"\n> **题目内容**：{q.question_text}\n")
     body_parts.append(f"\n## 正确答案\n\n{q.correct_answer}\n")
@@ -148,7 +158,7 @@ async def create_question(
 
     body = "\n".join(body_parts)
 
-    # 通过存储管理器保存（IMA + 本地双写，图片一并传入）
+    # 通过存储管理器保存（IMA + 本地双写）
     from app.services.storage_manager import get_storage_manager
     storage = get_storage_manager()
     storage_id = await storage.save_question(
@@ -158,21 +168,12 @@ async def create_question(
         subject=q.subject,
         frontmatter=frontmatter,
         body=body,
-        images=images,
     )
-
-    # 清理临时文件
-    for img in q.image_ids:
-        try:
-            Path(img.path).unlink(missing_ok=True)
-        except Exception as e:
-            logger.warning(f"清理临时图片失败 {img.path}: {e}")
 
     return {
         "success": True,
         "id": question_id,
         "file": str(storage_id),
-        "images_saved": len(images),
     }
 
 
@@ -216,56 +217,6 @@ async def get_question(
     raise HTTPException(status_code=404, detail="错题不存在")
 
 
-@router.get("/questions/{question_id}/images")
-async def get_question_images(
-    question_id: str,
-    child_id: str = Query(...),
-    subject: str = Query(...),
-    account: Account = Depends(get_active_account),
-    auth: AuthService = Depends(get_auth_service),
-):
-    """获取错题关联的图片列表"""
-    from app.core.config import settings as app_settings
-    _get_child(auth, account.id, child_id, subject)
-    assets_dir = (
-        app_settings.vault / "_assets" / "accounts" / account.id /
-        child_id / subject / question_id
-    )
-    if not assets_dir.exists():
-        return {"images": []}
-    images = []
-    for f in sorted(assets_dir.iterdir()):
-        if f.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp', '.heic'):
-            images.append({
-                "filename": f.name,
-                "url": f"/api/questions/{question_id}/images/{f.name}?child_id={child_id}&subject={subject}",
-            })
-    return {"images": images}
-
-
-@router.get("/questions/{question_id}/images/{filename}")
-async def serve_image(
-    question_id: str,
-    filename: str,
-    child_id: str = Query(...),
-    subject: str = Query(...),
-    account: Account = Depends(get_active_account),
-    auth: AuthService = Depends(get_auth_service),
-):
-    """提供图片文件"""
-    from app.core.config import settings as app_settings
-    _get_child(auth, account.id, child_id, subject)
-    if Path(filename).name != filename:
-        raise HTTPException(status_code=404, detail="图片不存在")
-    file_path = (
-        app_settings.vault / "_assets" / "accounts" / account.id /
-        child_id / subject / question_id / filename
-    )
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="图片不存在")
-    return FileResponse(file_path)
-
-
 @router.delete("/questions/{question_id}")
 async def delete_question(
     question_id: str,
@@ -289,22 +240,15 @@ async def update_question(
     if not new_child_id and not new_subject:
         raise HTTPException(status_code=400, detail="至少需要指定 new_child_id 或 new_subject")
 
-    # 查找文件
+    # 校验归属与课程，再读当前状态（IMA 为准，本地缓存兜底）
     _get_child(auth, account.id, child_id, subject)
-    questions = file_ops.list_questions(account.id, child_id, subject)
-    target = None
-    for q in questions:
-        if q.get("id") == question_id:
-            target = q
-            break
-
-    if not target:
-        raise HTTPException(status_code=404, detail="错题不存在")
-
-    # 读取完整数据
-    full_data = file_ops.read_question(target["_file"])
-    old_file = full_data.pop("_file")
-    body = full_data.pop("_body", "")
+    from app.services.storage_manager import get_storage_manager
+    storage = get_storage_manager()
+    target = _find_local_question(account.id, child_id, subject, question_id)
+    old_file = target["_file"]
+    full_data, body = await _load_for_update(
+        storage, account.id, child_id, subject, question_id
+    )
 
     # 更新字段
     final_child_id = new_child_id or child_id
@@ -316,38 +260,23 @@ async def update_question(
     if new_subject:
         full_data["subject"] = new_subject
 
-    # 移动文件（如果目标位置不同）
+    # 移动错题：变更孩子/学科时，本地缓存文件也要挪到新目录
     if final_child_id != child_id or final_subject != subject:
-        # 移动图片
-        old_assets = (
-            settings.vault / "_assets" / "accounts" / account.id /
-            child_id / subject / question_id
-        )
-        new_assets = (
-            settings.vault / "_assets" / "accounts" / account.id /
-            final_child_id / final_subject / question_id
-        )
-        if old_assets.exists():
-            import shutil
-            new_assets.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(old_assets), str(new_assets))
-
-        # 删除旧 markdown 文件
         from pathlib import Path as PathLib
         PathLib(old_file).unlink()
-
-        # 创建新的 markdown 文件
-        old_ref = f"/_assets/accounts/{account.id}/{child_id}/{subject}/{question_id}/"
-        new_ref = f"/_assets/accounts/{account.id}/{final_child_id}/{final_subject}/{question_id}/"
-        body = body.replace(old_ref, new_ref)
         new_file = file_ops.save_question(
             question_id, account.id, final_child_id, final_subject, full_data, body
         )
+        # IMA 没有移动笔记的接口，云端笔记仍留在原文件夹，只有标题与元数据会更新
+        ok = await storage.update_question(full_data, body, event={"type": "patch"})
+        if not ok:
+            raise HTTPException(status_code=503, detail="同步移动结果失败，请稍后重试")
         return {"success": True, "file": str(new_file)}
-    else:
-        # 只更新内容（不移动文件）
-        file_ops.update_question(old_file, full_data, body)
-        return {"success": True, "file": old_file}
+
+    ok = await storage.update_question(full_data, body, event={"type": "patch"})
+    if not ok:
+        raise HTTPException(status_code=503, detail="保存修改失败，请稍后重试")
+    return {"success": True, "file": old_file}
 
 
 @router.post("/questions/{question_id}/redo")
@@ -364,27 +293,19 @@ async def redo_question(
     from app.services.analyzer import calculate_mastery_score, mastery_level_from_score, mastery_status_from
     from app.services.review_scheduler import calculate_next_review
 
-    # 查找文件
+    # 校验归属与课程，再读当前状态（IMA 为准，本地缓存兜底）
     _get_child(auth, account.id, child_id, subject)
-    questions = file_ops.list_questions(account.id, child_id, subject)
-    target = None
-    for q in questions:
-        if q.get("id") == question_id:
-            target = q
-            break
-    if not target:
-        raise HTTPException(status_code=404, detail="错题不存在")
-
-    # 读取当前数据
-    full_data = file_ops.read_question(target["_file"])
-    file_path = full_data.pop("_file")
-    full_data.pop("_body", None)
+    from app.services.storage_manager import get_storage_manager
+    storage = get_storage_manager()
+    full_data, body = await _load_for_update(
+        storage, account.id, child_id, subject, question_id
+    )
 
     # 更新重做记录
     redo_count = full_data.get("redo_count", 0) + 1
     redo_history = full_data.get("redo_history", []) or []
     redo_history.append({
-        "date": date.today().isoformat(),
+        "date": timeutil.today().isoformat(),
         "result": req.result,
         "note": req.note,
     })
@@ -420,7 +341,7 @@ async def redo_question(
     full_data["wrong_count"] = wrong_count
     full_data["consecutive_correct"] = consecutive_correct
     full_data["redo_history"] = redo_history
-    full_data["last_redo_at"] = date.today().isoformat()
+    full_data["last_redo_at"] = timeutil.today().isoformat()
     full_data["mastery_score"] = mastery_score
     full_data["mastery_level"] = mastery_level
     full_data["mastery_status"] = mastery_status
@@ -428,8 +349,14 @@ async def redo_question(
     full_data["review_interval_days"] = new_interval
     full_data["total_reviews"] = full_data.get("total_reviews", 0) + 1
 
-    # 保存
-    file_ops.update_question(file_path, full_data)
+    # 以事件形式追加到 IMA（权威来源），本地缓存同步刷新
+    ok = await storage.update_question(
+        full_data,
+        body,
+        event={"type": "redo", "result": req.result, "note": req.note},
+    )
+    if not ok:
+        raise HTTPException(status_code=503, detail="保存重做结果失败，请稍后重试")
 
     return {
         "success": True,

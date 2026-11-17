@@ -4,6 +4,7 @@ import httpx
 import json
 import base64
 import io
+import re
 from pathlib import Path
 from typing import Optional
 from PIL import Image
@@ -16,6 +17,18 @@ from app.models.settings import LLMSettings
 MAX_IMAGE_SIZE = 1024  # 最大边长（像素）
 MAX_IMAGE_BYTES = 4 * 1024 * 1024  # 最大 4MB（base64 后约 5.3MB）
 JPEG_QUALITY = 85
+
+# 单次回答的最大 token 数（可在设置里用 max_tokens 覆盖）。
+#
+# 原值是 4096，对普通模型够用，但对**推理型模型**不够：
+# DeepSeek V4 这类模型会先输出 reasoning_content（思考过程）再输出正文，
+# 两者共享同一个 max_tokens 额度。实测 deepseek-flash 分析一张题目图时
+# 思考就吃掉 2000+ token，导致正文 JSON 在 question_text 中途被截断，
+# 报错「LLM 返回的不是有效 JSON (Unterminated string)」。
+#
+# 题目分析要一次性输出：题目文字、正确答案、解题过程、错误分析、改进建议，
+# 给足余量才不会截断。推理模型单价很低，多留额度的成本可以忽略。
+DEFAULT_MAX_TOKENS = 32768
 
 
 def _load_settings() -> LLMSettings:
@@ -59,6 +72,36 @@ def _preprocess_image(image_path: Path) -> tuple[str, str]:
     return b64, "image/jpeg"
 
 
+def _parse_json_reply(reply: str) -> dict:
+    """解析 LLM 返回的 JSON，兼容 markdown 代码块与 LaTeX 的非法转义。
+
+    模型被要求输出 JSON，而 LaTeX 命令（如 \\frac、\\sqrt）里的反斜杠在 JSON
+    字符串里必须转义成双反斜杠。推理模型偶尔会漏转义，直接输出单反斜杠的
+    LaTeX —— 这里先把非法转义修回合法 JSON，再交给 json.loads。
+
+    注意「合法转义」集合里**不含 f**：JSON 的 \\f 是换页符，但数学内容里换页符
+    几乎不可能出现，而 LaTeX 里以 f 开头的命令（\\frac、\\fbox）非常常见。
+    宁可把 \\f 也按字面量反斜杠处理，避免 \\frac 被误拆成「换页符 + rac」。
+    """
+    cleaned = reply.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    if cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    def fix_escape(match):
+        char = match.group(1)
+        if char in '"\\/bnrtu':  # 合法转义（不含 f，见 docstring）
+            return match.group(0)
+        return '\\\\' + char
+    cleaned = re.sub(r'\\(.)', fix_escape, cleaned)
+
+    return json.loads(cleaned, strict=False)
+
+
 async def analyze_images(image_paths: list[Path]) -> dict:
     """调用 LLM 分析题目图片"""
     llm_settings = _load_settings()
@@ -85,7 +128,11 @@ async def analyze_images(image_paths: list[Path]) -> dict:
             {"role": "user", "content": content},
         ],
         "temperature": 0.3,
-        "max_tokens": 4096,
+        "max_tokens": llm_settings.max_tokens or DEFAULT_MAX_TOKENS,
+        # 强制模型输出语法合法的 JSON。
+        # 推理模型在长文本里偶尔会漏逗号、写错引号（实测在 2000-2700 字符处出错），
+        # 加上这个参数由服务端保证语法合法，比事后用正则修补残破的输出可靠得多。
+        "response_format": {"type": "json_object"},
     }
 
     headers = {
@@ -93,44 +140,34 @@ async def analyze_images(image_paths: list[Path]) -> dict:
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=llm_settings.timeout) as client:
-        resp = await client.post(
-            f"{llm_settings.api_base}/chat/completions",
-            json=payload,
-            headers=headers,
-        )
-        resp.raise_for_status()
-        resp.encoding = "utf-8"
-        data = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=llm_settings.timeout) as client:
+            resp = await client.post(
+                f"{llm_settings.api_base}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            resp.encoding = "utf-8"
+            data = resp.json()
+    except httpx.TimeoutException:
+        # ⚠️ httpx 的超时异常 str() 是空字符串 —— 直接往上抛的话，
+        # 前端只会显示「失败」而没有任何原因，用户完全不知道发生了什么。
+        # 所以这里换成一条能指导下一步怎么办的消息。
+        raise ValueError(
+            f"AI 响应超时（等了 {llm_settings.timeout} 秒未返回）。"
+            "通常是因为一次要分析的题目太多 —— 建议减少一次上传的图片数量后重试。"
+        ) from None
+    except httpx.HTTPStatusError as e:
+        detail = (e.response.text or "")[:200]
+        raise ValueError(f"AI 服务返回错误 {e.response.status_code}：{detail}") from None
 
     # 提取回复文本
     reply = data["choices"][0]["message"]["content"]
 
     # 尝试解析 JSON
     try:
-        import re
-        # 去掉可能的 markdown 代码块标记
-        cleaned = reply.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-        if cleaned.startswith("```"):
-            cleaned = cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-
-        # 修复非法的转义字符（如 \p \s \D 等 LaTeX 命令）
-        # 合法转义: \" \\ \/ \b \f \n \r \t \uXXXX
-        # 非法转义保留反斜杠：\p → \\p（JSON 中表示字面量 \p）
-        def fix_escape(match):
-            char = match.group(1)
-            if char in '"\\/bfnrtu':
-                return match.group(0)  # 合法转义，保持不变
-            # 非法转义，双写反斜杠使其合法
-            return '\\\\' + char
-        cleaned = re.sub(r'\\(.)', fix_escape, cleaned)
-
-        return json.loads(cleaned, strict=False)
+        return _parse_json_reply(reply)
     except json.JSONDecodeError as e:
         raise ValueError(f"LLM 返回的不是有效 JSON (error: {e}):\n{reply[:500]}")
 
@@ -142,7 +179,9 @@ async def test_connection(api_base: str, api_key: str, model: str) -> dict:
         "messages": [
             {"role": "user", "content": "请回复 '连接成功'。"},
         ],
-        "max_tokens": 20,
+        # 推理模型会先输出思考（reasoning_content）再输出正文，20 太小会导致
+        # content 为空，用户点「测试连接」只看到成功却没回复。给足余量。
+        "max_tokens": 200,
     }
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -188,7 +227,7 @@ async def refine_analysis(image_paths: list[Path], feedback: str, current_result
 - 如果用户指出错误，请修正
 - 如果用户要求补充，请添加更多细节
 - 如果用户有不同观点，请考虑并调整分析
-- 继续使用纯文本格式，避免 LaTeX
+- 数学公式继续使用 LaTeX 格式（行内用 $...$，独立成行用 $$...$$）
 """
 
     content.append({"type": "text", "text": prompt})
@@ -202,7 +241,11 @@ async def refine_analysis(image_paths: list[Path], feedback: str, current_result
             {"role": "user", "content": content},
         ],
         "temperature": 0.3,
-        "max_tokens": 4096,
+        "max_tokens": llm_settings.max_tokens or DEFAULT_MAX_TOKENS,
+        # 强制模型输出语法合法的 JSON。
+        # 推理模型在长文本里偶尔会漏逗号、写错引号（实测在 2000-2700 字符处出错），
+        # 加上这个参数由服务端保证语法合法，比事后用正则修补残破的输出可靠得多。
+        "response_format": {"type": "json_object"},
     }
 
     headers = {
@@ -210,37 +253,32 @@ async def refine_analysis(image_paths: list[Path], feedback: str, current_result
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=llm_settings.timeout) as client:
-        resp = await client.post(
-            f"{llm_settings.api_base}/chat/completions",
-            json=payload,
-            headers=headers,
-        )
-        resp.raise_for_status()
-        resp.encoding = "utf-8"
-        data = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=llm_settings.timeout) as client:
+            resp = await client.post(
+                f"{llm_settings.api_base}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            resp.encoding = "utf-8"
+            data = resp.json()
+    except httpx.TimeoutException:
+        # ⚠️ httpx 的超时异常 str() 是空字符串 —— 直接往上抛的话，
+        # 前端只会显示「失败」而没有任何原因，用户完全不知道发生了什么。
+        # 所以这里换成一条能指导下一步怎么办的消息。
+        raise ValueError(
+            f"AI 响应超时（等了 {llm_settings.timeout} 秒未返回）。"
+            "通常是因为一次要分析的题目太多 —— 建议减少一次上传的图片数量后重试。"
+        ) from None
+    except httpx.HTTPStatusError as e:
+        detail = (e.response.text or "")[:200]
+        raise ValueError(f"AI 服务返回错误 {e.response.status_code}：{detail}") from None
 
     reply = data["choices"][0]["message"]["content"]
 
     # 解析 JSON（复用相同的逻辑）
     try:
-        import re
-        cleaned = reply.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-        if cleaned.startswith("```"):
-            cleaned = cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-
-        def fix_escape(match):
-            char = match.group(1)
-            if char in '"\\/bfnrtu':
-                return match.group(0)
-            return '\\\\' + char
-        cleaned = re.sub(r'\\(.)', fix_escape, cleaned)
-
-        return json.loads(cleaned, strict=False)
+        return _parse_json_reply(reply)
     except json.JSONDecodeError as e:
         raise ValueError(f"LLM 返回的不是有效 JSON (error: {e}):\n{reply[:500]}")
