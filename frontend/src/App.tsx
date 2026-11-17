@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Settings,
   ShieldCheck,
+  Target,
   type LucideIcon,
 } from 'lucide-react'
 import { useStore } from './store/useStore'
@@ -28,6 +29,7 @@ import InitializePage from './pages/InitializePage'
 import ChangePasswordPage from './pages/ChangePasswordPage'
 import ChildrenPage from './pages/ChildrenPage'
 import AdminPage from './pages/AdminPage'
+import ZhentiPage from './pages/ZhentiPage'
 
 /** 导航项：[路由, 名称, 图标组件] */
 type NavItem = [path: string, label: string, Icon: LucideIcon]
@@ -42,6 +44,7 @@ function Workspace() {
     ['/', '上传', Camera],
     ['/list', '列表', ListChecks],
     ['/review', '复习', RefreshCw],
+    ['/zhenti', '真题', Target],
     ['/dashboard', '统计', BarChart3],
     ['/children', '孩子', Baby],
   ]
@@ -77,6 +80,7 @@ function Workspace() {
           <Route path="/question/:id" element={childPage(<DetailPage />)} />
           <Route path="/review" element={childPage(<ReviewPage />)} />
           <Route path="/dashboard" element={childPage(<DashboardPage />)} />
+          <Route path="/zhenti" element={<ZhentiPage />} />
           <Route path="/children" element={<ChildrenPage />} />
           <Route path="/settings" element={account?.role === 'admin' ? <SettingsPage /> : <Navigate to="/" />} />
           <Route path="/admin" element={account?.role === 'admin' ? <AdminPage /> : <Navigate to="/" />} />

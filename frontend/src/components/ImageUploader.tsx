@@ -7,6 +7,8 @@ import { ImagePlus } from 'lucide-react'
 interface Props {
   files: File[]
   setFiles: Dispatch<SetStateAction<File[]>>
+  /** v2.0：允许 PDF（真题卷导入），逐页转图由后端完成 */
+  allowPdf?: boolean
 }
 
 // 与后端 app/api/routes/upload.py 的校验规则保持一致
@@ -14,12 +16,14 @@ const MAX_FILES = 10
 const MAX_FILE_BYTES = 20 * 1024 * 1024
 const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp']
 const ACCEPT_ATTR = '.jpg,.jpeg,.png,.heic,.heif,.webp'
+const PDF_ACCEPT_ATTR = ACCEPT_ATTR + ',.pdf'
 
 const extensionOf = (name: string) => name.split('.').pop()?.toLowerCase() ?? ''
 
-function validate(file: File, currentCount: number): string | null {
-  if (!ALLOWED_EXTENSIONS.includes(extensionOf(file.name))) {
-    return `${file.name} 格式不受支持，请上传 jpg / png / heic / webp 图片`
+function validate(file: File, currentCount: number, allowPdf: boolean): string | null {
+  const allowed = allowPdf ? [...ALLOWED_EXTENSIONS, 'pdf'] : ALLOWED_EXTENSIONS
+  if (!allowed.includes(extensionOf(file.name))) {
+    return `${file.name} 格式不受支持，请上传 jpg / png / heic / webp 图片${allowPdf ? '或 PDF' : ''}`
   }
   if (file.size > MAX_FILE_BYTES) {
     return `${file.name} 超过 20MB，请压缩后重试`
@@ -30,7 +34,7 @@ function validate(file: File, currentCount: number): string | null {
   return null
 }
 
-export default function ImageUploader({ files, setFiles }: Props) {
+export default function ImageUploader({ files, setFiles, allowPdf = false }: Props) {
   const [previews, setPreviews] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState('')
@@ -54,7 +58,7 @@ export default function ImageUploader({ files, setFiles }: Props) {
     const rejected: string[] = []
     const accepted: File[] = []
     for (const file of Array.from(newFiles)) {
-      const problem = validate(file, files.length + accepted.length)
+      const problem = validate(file, files.length + accepted.length, allowPdf)
       if (problem) {
         if (!rejected.includes(problem)) rejected.push(problem)
       } else {
@@ -104,13 +108,13 @@ export default function ImageUploader({ files, setFiles }: Props) {
           点击上传或拖拽图片到此处
         </p>
         <p style={{ margin: 0, fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-          支持 jpg / png / heic / webp，单张 ≤ 20MB，最多 {MAX_FILES} 张
+          支持 jpg / png / heic / webp{allowPdf ? ' / PDF（真题卷，自动逐页拆分）' : ''}，单张 ≤ 20MB，最多 {MAX_FILES} 个文件
         </p>
       </div>
       <input
         ref={inputRef}
         type="file"
-        accept={ACCEPT_ATTR}
+        accept={allowPdf ? PDF_ACCEPT_ATTR : ACCEPT_ATTR}
         multiple
         style={{ display: 'none' }}
         onChange={e => handleFiles(e.target.files)}
@@ -122,6 +126,28 @@ export default function ImageUploader({ files, setFiles }: Props) {
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '16px' }}>
           {previews.map((src, i) => (
             <div key={i} style={{ position: 'relative' }}>
+              {files[i]?.name.toLowerCase().endsWith('.pdf') ? (
+                <div style={{
+                  width: '90px',
+                  height: '90px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-surface-2)',
+                  fontSize: '11px',
+                  color: 'var(--color-text-secondary)',
+                  overflow: 'hidden',
+                  padding: '4px',
+                  textAlign: 'center',
+                }}>
+                  <span style={{ fontSize: '24px' }}>📄</span>
+                  <span style={{ wordBreak: 'break-all', maxHeight: '32px', overflow: 'hidden' }}>{files[i].name}</span>
+                </div>
+              ) : (
               <img
                 src={src}
                 alt=""
@@ -133,6 +159,7 @@ export default function ImageUploader({ files, setFiles }: Props) {
                   border: '1px solid var(--color-border)',
                 }}
               />
+              )}
               <button
                 onClick={(e) => { e.stopPropagation(); removeImage(i) }}
                 style={{

@@ -563,3 +563,7 @@ h2 {
     bottom: var(--space-3);
   }
 }
+
+/* 加载旋转（v2.0 真题任务状态用） */
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }

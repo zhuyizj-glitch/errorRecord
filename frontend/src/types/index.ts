@@ -106,3 +106,83 @@ export interface LLMSettings {
   system_prompt?: string
   timeout?: number
 }
+
+// ── v2.0 真题库 ──────────────────────────────────────────────
+
+/** 真题库条目（账号级资源，不绑定孩子） */
+export interface ZhentiQuestion {
+  id: string
+  account_id: string
+  subject: string
+  year: string
+  source: string
+  number?: string
+  topic?: string
+  knowledge_points: string[]
+  difficulty: string
+  has_diagram?: boolean
+  diagram_description?: string
+  created_at: string
+  practice_count: number
+  correct_count: number
+  wrong_count: number
+  last_practice_at?: string | null
+  practice_history?: Array<{ date: string; child_id: string; result: string; note?: string }>
+  converted_to?: Array<{ child_id: string; child_name: string; question_id: string; date: string }>
+  _file?: string
+  _body?: string
+  _question?: string
+  _answer?: string
+  _solution?: string
+  _structured?: boolean
+}
+
+/** AI 从真题卷拆出的单道题（空白卷，无学生作答） */
+export interface ZhentiAnalysisItem {
+  number?: string
+  question_text: string
+  has_diagram?: boolean
+  diagram_description?: string
+  correct_answer: string
+  solution_steps?: string
+  topic?: string
+  knowledge_points: string[]
+  difficulty: string
+  confidence?: string
+}
+
+export interface ZhentiAnalyzeResult {
+  subject?: string
+  questions: ZhentiAnalysisItem[]
+}
+
+/** 真题分析任务（kind=zhenti，meta 带年份/来源） */
+export interface ZhentiTask {
+  id: string
+  account_id: string
+  child_id: string
+  subject: string
+  image_ids: Array<{ id: string; path: string; filename: string }>
+  kind: string
+  meta: { year?: string; source?: string }
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  result?: ZhentiAnalyzeResult
+  error?: string
+  created_at: string
+  completed_at?: string
+}
+
+/** 薄弱知识点（未掌握错题按知识点聚合） */
+export interface WeakPoint {
+  knowledge_point: string
+  weight: number
+  question_count: number
+  avg_mastery: number
+}
+
+/** 推荐真题：附带匹配得分与命中的薄弱点 */
+export interface ZhentiRecommendation extends ZhentiQuestion {
+  match_score: number
+  matched_points: string[]
+  child_practice_count: number
+}
