@@ -3,7 +3,7 @@ services:
     build: ./backend
     container_name: mistakes-backend
     ports:
-      - "8001:8000"
+      - "${BACKEND_PORT:-8001}:8000"
     volumes:
       # Obsidian vault（写入错题文件）
       - ${VAULT_PATH}:/vault
@@ -14,6 +14,9 @@ services:
       # ima-skills skill
       - ~/.claude/skills/@tencent-adm/ima-skills:/root/.claude/skills/@tencent-adm/ima-skills:ro
     environment:
+      # 容器默认是 UTC。业务代码已改用 app/core/timeutil.py 显式取北京时间，
+      # 这里再设一层 TZ，让容器内的日志时间戳也跟着正确。
+      - TZ=Asia/Shanghai
       - VAULT_PATH=/vault
       - CONFIG_PATH=/app/config
       - DATABASE_URL=sqlite:////app/config/app.db

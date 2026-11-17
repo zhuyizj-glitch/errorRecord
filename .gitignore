@@ -39,9 +39,23 @@ config/settings.json
 config/app.db
 config/app.db-shm
 config/app.db-wal
+# IMA 跳过缓存的运行时状态（记录哪些笔记已确认不是错题）
+config/ima_skip_cache.json
 
 # Claude settings (contains command history with secrets)
 .claude/settings.local.json
 
 # Test files
 test_*.png
+
+# macOS AppleDouble 残留
+._*
+
+# 部署验证截图（本地记录，不进库）
+dsh-panel-check*.png
+
+# 前端构建缓存
+frontend/tsconfig.tsbuildinfo
+
+# pytest 缓存
+.pytest_cache/
