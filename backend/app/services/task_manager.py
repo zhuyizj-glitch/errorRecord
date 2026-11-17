@@ -23,6 +23,10 @@ class AnalysisTask:
     child_id: str
     subject: str
     image_ids: list[dict]
+    # v2.0：任务类型。"mistake"=错题分析（默认），"zhenti"=真题卷分析。
+    # meta 携带真题的 year/source 等上下文；错题任务为空 dict。
+    kind: str = "mistake"
+    meta: dict = field(default_factory=dict)
     status: TaskStatus = TaskStatus.PENDING
     result: Optional[dict] = None
     error: Optional[str] = None
@@ -47,9 +51,10 @@ class TaskManager:
         self._lock = asyncio.Lock()
 
     def create_task(
-        self, account_id: str, child_id: str, subject: str, image_ids: list[dict]
+        self, account_id: str, child_id: str, subject: str, image_ids: list[dict],
+        kind: str = "mistake", meta: Optional[dict] = None,
     ) -> AnalysisTask:
-        """创建新任务"""
+        """创建新任务（kind/meta 向后兼容，默认仍是错题分析）"""
         task_id = uuid.uuid4().hex[:8]
         task = AnalysisTask(
             id=task_id,
@@ -57,6 +62,8 @@ class TaskManager:
             child_id=child_id,
             subject=subject,
             image_ids=image_ids,
+            kind=kind,
+            meta=meta or {},
         )
         self.tasks[task_id] = task
         return task

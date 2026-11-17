@@ -282,3 +282,73 @@ async def refine_analysis(image_paths: list[Path], feedback: str, current_result
         return _parse_json_reply(reply)
     except json.JSONDecodeError as e:
         raise ValueError(f"LLM 返回的不是有效 JSON (error: {e}):\n{reply[:500]}")
+
+
+# ── v2.0：真题卷分析 ──────────────────────────────────────────
+
+async def _post_chat(llm_settings: LLMSettings, payload: dict) -> dict:
+    """发送 chat 请求并解析 JSON 回复（统一的超时/错误处理）。
+
+    与 analyze_images 内的逻辑一致；新代码走这里，
+    旧函数保持原样不动（避免回归风险）。
+    """
+    headers = {
+        "Authorization": f"Bearer {llm_settings.api_key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=llm_settings.timeout) as client:
+            resp = await client.post(
+                f"{llm_settings.api_base}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            resp.encoding = "utf-8"
+            data = resp.json()
+    except httpx.TimeoutException:
+        raise ValueError(
+            f"AI 响应超时（等了 {llm_settings.timeout} 秒未返回）。"
+            "真题卷整页题目较多时容易超时 —— 建议减少单次上传的页数后重试。"
+        ) from None
+    except httpx.HTTPStatusError as e:
+        detail = (e.response.text or "")[:200]
+        raise ValueError(f"AI 服务返回错误 {e.response.status_code}：{detail}") from None
+
+    reply = data["choices"][0]["message"]["content"]
+    try:
+        return _parse_json_reply(reply)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"LLM 返回的不是有效 JSON (error: {e}):\n{reply[:500]}")
+
+
+async def analyze_exam_images(image_paths: list[Path], vocab: list[str]) -> dict:
+    """分析真题卷图片（空白卷，无学生作答）。
+
+    vocab：库内已有知识点词汇表，注入提示词让 AI 尽量复用标签，
+    提高与错题薄弱点的匹配率。
+    """
+    from app.core.prompts import build_exam_prompt
+
+    llm_settings = _load_settings()
+
+    content = []
+    for path in image_paths:
+        b64, media_type = _preprocess_image(path)
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{media_type};base64,{b64}"},
+        })
+    content.append({"type": "text", "text": "请分析这张真题卷图片，按题号逐题拆分。"})
+
+    payload = {
+        "model": llm_settings.model,
+        "messages": [
+            {"role": "system", "content": build_exam_prompt(vocab)},
+            {"role": "user", "content": content},
+        ],
+        "temperature": 0.3,
+        "max_tokens": llm_settings.max_tokens or DEFAULT_MAX_TOKENS,
+        "response_format": {"type": "json_object"},
+    }
+    return await _post_chat(llm_settings, payload)

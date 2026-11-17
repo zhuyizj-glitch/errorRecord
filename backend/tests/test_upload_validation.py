@@ -69,7 +69,7 @@ class UploadValidationTest(unittest.TestCase):
         self.assertEqual(payload["warnings"], [])
 
     def test_unsupported_extension_is_rejected(self):
-        response = self.upload(("note.pdf", png_bytes()))
+        response = self.upload(("note.bmp", png_bytes()))
         self.assertEqual(response.status_code, 400)
         self.assertIn("格式不受支持", response.json()["detail"])
 

@@ -33,8 +33,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="错题集 API",
-    description="为两个孩子管理的多学科错题收集、分析与复习系统",
-    version="0.1.0",
+    description="多学科错题收集、分析与复习系统 · v2.0 真题针对性复习",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -48,7 +48,7 @@ app.add_middleware(
 )
 
 # 注册路由
-from app.api.routes import admin, auth, children, questions, upload, review, settings as settings_routes, stats, tasks, sync
+from app.api.routes import admin, auth, children, questions, upload, review, settings as settings_routes, stats, tasks, sync, zhenti
 
 app.include_router(auth.router, prefix="/api", tags=["认证"])
 app.include_router(admin.router, prefix="/api", tags=["管理员"])
@@ -60,6 +60,7 @@ app.include_router(settings_routes.router, prefix="/api", tags=["设置"])
 app.include_router(stats.router, prefix="/api", tags=["统计"])
 app.include_router(tasks.router, prefix="/api", tags=["任务"])
 app.include_router(sync.router, prefix="/api", tags=["同步"])
+app.include_router(zhenti.router, prefix="/api", tags=["真题"])
 
 
 @app.get("/api/health")
