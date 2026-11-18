@@ -12,6 +12,7 @@ from app.api.routes.questions import _get_child, create_question
 from app.api.routes.tasks import _analysis_lock
 from app.api.routes.upload import TEMP_DIR
 from app.core import timeutil
+from app.core.stages import stage_rank
 from app.models.auth import Account
 from app.models.question import QuestionCreate
 from app.models.zhenti import (
@@ -49,6 +50,15 @@ def _account_questions(auth: AuthService, account_id: str) -> list[dict]:
     for child_id in child_ids:
         questions.extend(file_ops.list_questions(account_id, child_id))
     return questions
+
+
+def _child_stage(auth: AuthService, account_id: str, child_id: str) -> str:
+    with auth.db.connect() as connection:
+        row = connection.execute(
+            "SELECT current_stage FROM children WHERE id = ? AND account_id = ?",
+            (child_id, account_id),
+        ).fetchone()
+    return (row["current_stage"] or "") if row else ""
 
 
 def _load_zhenti(account_id: str, zhenti_id: str, subject: Optional[str]) -> dict:
@@ -91,7 +101,7 @@ async def import_zhenti(
         _account_questions(auth, account.id), zhenti_ops.list_zhenti(account.id))
     task = task_manager.create_task(
         account.id, "", req.subject, valid_ids,
-        kind="zhenti", meta={"year": req.year.strip(), "source": req.source.strip()})
+        kind="zhenti", meta={"year": req.year.strip(), "source": req.source.strip(), "stage": req.stage.strip()})
     background_tasks.add_task(_run_exam_analysis, task.id, valid_paths, vocab, req.subject)
     return {"task_id": task.id, "status": task.status.value, "created_at": task.created_at}
 
@@ -113,7 +123,8 @@ async def save_zhenti_questions(
         zhenti_id = uuid.uuid4().hex[:8]
         data = item.model_dump()
         fm = zhenti_ops.new_frontmatter(
-            zhenti_id, account.id, req.subject, req.year.strip(), req.source.strip(), data)
+            zhenti_id, account.id, req.subject, req.year.strip(), req.source.strip(), data,
+            stage=req.stage.strip())
         zhenti_ops.save_zhenti(zhenti_id, account.id, req.subject, fm, zhenti_ops.build_body(data))
         saved_ids.append(zhenti_id)
     return {"success": True, "saved": len(saved_ids), "ids": saved_ids}
@@ -128,10 +139,13 @@ async def list_zhenti_questions(
     module: Optional[str] = Query(None),
     question_form: Optional[str] = Query(None),
     question_type: Optional[str] = Query(None),
+    stage: Optional[str] = Query(None),
     account: Account = Depends(get_active_account),
 ):
-    """题库列表（学科/年份/知识点/时代/主题/形态/题型筛选）"""
+    """题库列表（学科/年份/知识点/时代/主题/形态/题型/阶段筛选）"""
     items = zhenti_ops.list_zhenti(account.id, subject)
+    if stage:
+        items = [i for i in items if i.get("stage") == stage]
     if year:
         items = [i for i in items if str(i.get("year")) == year]
     if era:
@@ -163,8 +177,10 @@ async def get_dimensions(
 ):
     """题库可用筛选维度：历史时代轴 / 政治主题轴 / 语篇题型与评级"""
     items = zhenti_ops.list_zhenti(account.id, subject)
-    eras, modules, types, ratings = set(), set(), set(), set()
+    eras, modules, types, ratings, stages = set(), set(), set(), set(), set()
     for i in items:
+        if i.get("stage"):
+            stages.add(i["stage"])
         if i.get("era"):
             eras.add(i["era"])
         if i.get("module"):
@@ -179,7 +195,8 @@ async def get_dimensions(
             if s.get("module"):
                 modules.add(s["module"])
     return {"eras": sorted(eras), "modules": sorted(modules),
-            "question_types": sorted(types), "ratings": sorted(ratings)}
+            "question_types": sorted(types), "ratings": sorted(ratings),
+            "stages": sorted(stages, key=stage_rank)}
 
 
 @router.get("/zhenti/questions/{zhenti_id}")
@@ -218,7 +235,7 @@ async def patch_zhenti_question(
         body = zhenti_ops.build_body(content)
 
     for field in ("topic", "knowledge_points", "difficulty", "year", "source", "number",
-                  "question_type", "rating", "era", "module"):
+                  "question_type", "rating", "era", "module", "stage"):
         value = getattr(req, field)
         if value is not None:
             data[field] = value
@@ -365,6 +382,10 @@ async def recommend_zhenti(
     questions = file_ops.list_questions(account.id, child_id, subject)
     weak = zhenti_match.collect_weak_points(questions)
     bank = zhenti_ops.list_zhenti(account.id, subject)
+    # 超纲过滤：只保留阶段 ≤ 孩子当前阶段的题（孩子未设阶段则不过滤）
+    child_rank = stage_rank(_child_stage(auth, account.id, child_id))
+    if child_rank >= 0:
+        bank = [i for i in bank if stage_rank(i.get("stage")) <= child_rank]
     recommendations = zhenti_match.recommend(
         weak, bank, child_id, subject=subject, era=era, module=module, limit=limit)
 

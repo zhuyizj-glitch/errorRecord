@@ -28,7 +28,8 @@ export default function ZhentiBank() {
   const [era, setEra] = useState('')
   const [module, setModule] = useState('')
   const [qtype, setQtype] = useState('')
-  const [dims, setDims] = useState<ZhentiDimensions>({ eras: [], modules: [], question_types: [], ratings: [] })
+  const [stage, setStage] = useState('')
+  const [dims, setDims] = useState<ZhentiDimensions>({ eras: [], modules: [], question_types: [], ratings: [], stages: [] })
   const [items, setItems] = useState<ZhentiQuestion[]>([])
   const [loading, setLoading] = useState(false)
   const [detail, setDetail] = useState<ZhentiQuestion | null>(null)
@@ -39,7 +40,7 @@ export default function ZhentiBank() {
 
   useEffect(() => {
     fetchZhentiDimensions(subject || undefined).then(setDims).catch(() => {})
-    setEra(''); setModule(''); setQtype('')
+    setEra(''); setModule(''); setQtype(''); setStage('')
   }, [subject])
 
   const load = useCallback(async () => {
@@ -52,10 +53,11 @@ export default function ZhentiBank() {
       if (era) params.era = era
       if (module) params.module = module
       if (qtype) params.question_type = qtype
+      if (stage) params.stage = stage
       const res = await fetchZhentiQuestions(params)
       setItems(res.questions)
     } catch { setMessage('加载题库失败') } finally { setLoading(false) }
-  }, [subject, year, kp, era, module, qtype])
+  }, [subject, year, kp, era, module, qtype, stage])
 
   useEffect(() => { load() }, [load])
 
@@ -111,6 +113,12 @@ export default function ZhentiBank() {
             {dims.question_types.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         )}
+        {dims.stages.length > 0 && (
+          <select value={stage} onChange={e => setStage(e.target.value)} style={inputStyle}>
+            <option value="">全部阶段</option>
+            {dims.stages.map(st => <option key={st} value={st}>{st}</option>)}
+          </select>
+        )}
         <div style={{ position: 'relative', flex: 1, minWidth: 160 }}>
           <Search size={14} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--color-text-tertiary)' }} />
           <input value={kp} onChange={e => setKp(e.target.value)} placeholder="按知识点搜索…" style={{ ...inputStyle, width: '100%', paddingLeft: 30 }} />
@@ -144,6 +152,7 @@ export default function ZhentiBank() {
               {item.rating && <span style={{ fontSize: 12, color: 'var(--color-warning)' }}>评级·{item.rating}</span>}
               {item.era && <span style={{ ...chipStyle, background: 'var(--color-warning-light)', color: 'var(--color-warning)' }}>{item.era}</span>}
               {item.module && <span style={{ ...chipStyle, background: 'var(--color-success-light)', color: 'var(--color-success)' }}>{item.module}</span>}
+              {item.stage && <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>{item.stage}</span>}
             </div>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{item.topic || item.question_type || '未分类'}</div>
             <div style={{ marginBottom: 6 }}>

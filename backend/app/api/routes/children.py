@@ -10,6 +10,7 @@ from app.api.deps import get_active_account, get_auth_service
 from app.models.auth import Account
 from app.services.auth_service import AuthService
 from app.services import file_ops
+from app.core.stages import STAGES, is_valid_stage
 
 
 router = APIRouter()
@@ -20,6 +21,15 @@ class ChildRequest(BaseModel):
     name: str
     emoji: str = "🧒"
     subjects: list[str]
+    current_stage: str = ""
+
+    @field_validator("current_stage")
+    @classmethod
+    def valid_stage(cls, value: str) -> str:
+        value = (value or "").strip()
+        if value and not is_valid_stage(value):
+            raise ValueError("学习阶段不在阶段词汇表中")
+        return value
 
     @field_validator("name")
     @classmethod
@@ -41,7 +51,7 @@ class ChildRequest(BaseModel):
 
 def _read_child(connection, child_id: str, account_id: str) -> dict | None:
     child = connection.execute(
-        "SELECT id, name, emoji FROM children WHERE id = ? AND account_id = ?",
+        "SELECT id, name, emoji, current_stage FROM children WHERE id = ? AND account_id = ?",
         (child_id, account_id),
     ).fetchone()
     if not child:
@@ -51,7 +61,8 @@ def _read_child(connection, child_id: str, account_id: str) -> dict | None:
         (child_id,),
     ).fetchall()
     selected = {row["subject"] for row in enabled}
-    return {**dict(child), "subjects": [subject for subject in SUBJECTS if subject in selected]}
+    return {**dict(child), "current_stage": child["current_stage"] or "",
+            "subjects": [subject for subject in SUBJECTS if subject in selected]}
 
 
 @router.get("/children")
@@ -65,7 +76,7 @@ def list_children(
             (account.id,),
         ).fetchall()
         children = [_read_child(connection, row["id"], account.id) for row in ids]
-    return {"children": children, "available_subjects": SUBJECTS}
+    return {"children": children, "available_subjects": SUBJECTS, "available_stages": STAGES}
 
 
 @router.post("/children", status_code=status.HTTP_201_CREATED)
@@ -78,9 +89,9 @@ def create_child(
     now = datetime.now(timezone.utc).isoformat()
     with auth.db.transaction() as connection:
         connection.execute(
-            "INSERT INTO children (id, account_id, name, emoji, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (child_id, account.id, req.name, req.emoji, now, now),
+            "INSERT INTO children (id, account_id, name, emoji, current_stage, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (child_id, account.id, req.name, req.emoji, req.current_stage, now, now),
         )
         connection.executemany(
             "INSERT INTO child_subjects (child_id, subject, enabled) VALUES (?, ?, 1)",
@@ -110,9 +121,9 @@ def update_child(
         previous_name = previous["name"]
 
         connection.execute(
-            "UPDATE children SET name = ?, emoji = ?, updated_at = ? "
+            "UPDATE children SET name = ?, emoji = ?, current_stage = ?, updated_at = ? "
             "WHERE id = ? AND account_id = ?",
-            (req.name, req.emoji, now, child_id, account.id),
+            (req.name, req.emoji, req.current_stage, now, child_id, account.id),
         )
         connection.execute("UPDATE child_subjects SET enabled = 0 WHERE child_id = ?", (child_id,))
         for subject in req.subjects:

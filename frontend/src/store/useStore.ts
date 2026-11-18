@@ -7,6 +7,7 @@ import type { Child } from '../types'
 interface AppState {
   children: Child[]
   availableSubjects: string[]
+  availableStages: string[]
   currentChild: string | null
   currentSubject: string | null
   setChild: (child: string) => void
@@ -17,6 +18,7 @@ interface AppState {
 export const useStore = create<AppState>((set, get) => ({
   children: [],
   availableSubjects: [],
+  availableStages: [],
   currentChild: null,
   currentSubject: null,
 
@@ -31,7 +33,7 @@ export const useStore = create<AppState>((set, get) => ({
   fetchChildren: async () => {
     try {
       const data = await apiFetchChildren()
-      set({ children: data.children, availableSubjects: data.available_subjects })
+      set({ children: data.children, availableSubjects: data.available_subjects, availableStages: data.available_stages || [] })
       // 默认选第一个孩子
       const ids = data.children.map((child: Child) => child.id)
       if (ids.length > 0 && !ids.includes(get().currentChild || '')) {

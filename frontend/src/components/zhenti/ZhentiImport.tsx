@@ -26,10 +26,12 @@ const parseKps = (v: string) => v.split(/[,，、]/).map(s => s.trim()).filter(B
 export default function ZhentiImport() {
   const availableSubjects = useStore(s => s.availableSubjects)
   const currentSubject = useStore(s => s.currentSubject)
+  const availableStages = useStore(s => s.availableStages)
   const [files, setFiles] = useState<File[]>([])
   const [subject, setSubject] = useState(currentSubject || '数学')
   const [year, setYear] = useState('')
   const [source, setSource] = useState('')
+  const [stage, setStage] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [tasks, setTasks] = useState<ZhentiTask[]>([])
@@ -73,10 +75,10 @@ export default function ZhentiImport() {
       if (uploaded.warnings?.length) setMessage(uploaded.warnings.join('；'))
       const stubs: ZhentiTask[] = []
       for (const img of uploaded.image_ids) {
-        const res = await importZhenti({ subject, year: year.trim(), source: source.trim(), image_ids: [img] })
+        const res = await importZhenti({ subject, year: year.trim(), source: source.trim(), stage, image_ids: [img] })
         stubs.push({
           id: res.task_id, account_id: '', child_id: '', subject, image_ids: [img], kind: 'zhenti',
-          meta: { year: year.trim(), source: source.trim() }, status: 'pending', created_at: res.created_at,
+          meta: { year: year.trim(), source: source.trim(), stage }, status: 'pending', created_at: res.created_at,
         })
       }
       setTasks(prev => [...stubs, ...prev]); setFiles([])
@@ -101,7 +103,7 @@ export default function ZhentiImport() {
     if (items.length === 0) { setMessage('请至少勾选一道题'); return }
     try {
       const res = await saveZhentiQuestions({
-        subject: task.subject, year: task.meta.year || year, source: task.meta.source || source, questions: items,
+        subject: task.subject, year: task.meta.year || year, source: task.meta.source || source, stage: task.meta.stage || stage, questions: items,
       })
       setSaved(prev => ({ ...prev, [task.id]: res.saved }))
       setMessage(`已入库 ${res.saved} 道真题`)
@@ -195,7 +197,7 @@ export default function ZhentiImport() {
         <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>
           <FileUp size={16} style={{ verticalAlign: '-3px', marginRight: 6 }} />导入真题卷
         </h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 10, marginBottom: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 2fr', gap: 10, marginBottom: 12 }}>
           <label style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>学科
             <select value={subject} onChange={e => setSubject(e.target.value)} style={{ ...inputStyle, marginTop: 4 }}>
               {(availableSubjects.length ? availableSubjects : ['数学']).map(s => <option key={s} value={s}>{s}</option>)}
@@ -203,6 +205,12 @@ export default function ZhentiImport() {
           </label>
           <label style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>年份
             <input value={year} onChange={e => setYear(e.target.value)} placeholder="如 2024" style={{ ...inputStyle, marginTop: 4 }} />
+          </label>
+          <label style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>阶段
+            <select value={stage} onChange={e => setStage(e.target.value)} style={{ ...inputStyle, marginTop: 4 }}>
+              <option value="">未指定</option>
+              {availableStages.map(st => <option key={st} value={st}>{st}</option>)}
+            </select>
           </label>
           <label style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>试卷来源
             <input value={source} onChange={e => setSource(e.target.value)} placeholder="如 2024年中考数学卷" style={{ ...inputStyle, marginTop: 4 }} />

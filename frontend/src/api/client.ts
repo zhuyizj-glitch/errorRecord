@@ -60,7 +60,7 @@ export default api
 export const importZhenti = (data: any) => api.post('/zhenti/import', data).then(r => r.data)
 export const fetchZhentiTasks = () => api.get('/zhenti/tasks').then(r => r.data)
 export const saveZhentiQuestions = (data: any) => api.post('/zhenti/questions', data).then(r => r.data)
-export const fetchZhentiQuestions = (params?: { subject?: string; year?: string; knowledge_point?: string; era?: string; module?: string; question_form?: string; question_type?: string }) =>
+export const fetchZhentiQuestions = (params?: { subject?: string; year?: string; knowledge_point?: string; era?: string; module?: string; question_form?: string; question_type?: string; stage?: string }) =>
   api.get('/zhenti/questions', { params }).then(r => r.data)
 export const fetchZhentiDimensions = (subject?: string) =>
   api.get('/zhenti/dimensions', { params: { subject } }).then(r => r.data)

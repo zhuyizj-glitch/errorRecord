@@ -30,7 +30,7 @@ export default function ZhentiPractice() {
   const [subject, setSubject] = useState('')
   const [era, setEra] = useState('')
   const [module, setModule] = useState('')
-  const [dims, setDims] = useState<ZhentiDimensions>({ eras: [], modules: [], question_types: [], ratings: [] })
+  const [dims, setDims] = useState<ZhentiDimensions>({ eras: [], modules: [], question_types: [], ratings: [], stages: [] })
   const [weak, setWeak] = useState<WeakPoint[]>([])
   const [unmatched, setUnmatched] = useState<string[]>([])
   const [recs, setRecs] = useState<ZhentiRecommendation[]>([])
@@ -168,6 +168,7 @@ export default function ZhentiPractice() {
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 14, color: 'var(--color-text-secondary)' }}>
           为 <strong style={{ color: 'var(--color-text)' }}>{child.emoji} {child.name}</strong> 推荐
+          {child.current_stage && <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-text-tertiary)' }}>当前阶段：{child.current_stage}（已过滤超纲题）</span>}
         </span>
         <select value={subject} onChange={e => setSubject(e.target.value)} style={selectStyle}>
           <option value="">全部学科</option>

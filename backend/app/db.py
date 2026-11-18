@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS children (
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     emoji TEXT NOT NULL DEFAULT '🧒',
+    current_stage TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -74,6 +75,14 @@ class Database:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            self._migrate(connection)
+
+    @staticmethod
+    def _migrate(connection) -> None:
+        """增量迁移：为已存在的旧库补充新列（SQLite 无 ADD COLUMN IF NOT EXISTS）。"""
+        cols = {row["name"] for row in connection.execute("PRAGMA table_info(children)")}
+        if "current_stage" not in cols:
+            connection.execute("ALTER TABLE children ADD COLUMN current_stage TEXT")
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:

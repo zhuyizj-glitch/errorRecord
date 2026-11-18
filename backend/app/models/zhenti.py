@@ -66,6 +66,7 @@ class ZhentiImportRequest(BaseModel):
     subject: str
     year: str = Field(min_length=1, max_length=20)
     source: str = Field(min_length=1, max_length=120)
+    stage: str = ""
     image_ids: list[dict]
 
 
@@ -94,6 +95,7 @@ class ZhentiSaveRequest(BaseModel):
     subject: str
     year: str = Field(min_length=1, max_length=20)
     source: str = Field(min_length=1, max_length=120)
+    stage: str = ""
     questions: list[ZhentiSaveItem] = Field(min_length=1)
 
 
@@ -113,6 +115,7 @@ class ZhentiPatchRequest(BaseModel):
     rating: Optional[str] = None
     era: Optional[str] = None
     module: Optional[str] = None
+    stage: Optional[str] = None
     passage: Optional[str] = None
     sub_questions: Optional[list[ZhentiSubQuestion]] = None
 

@@ -84,7 +84,8 @@ def build_body(item: dict) -> str:
 
 
 def new_frontmatter(
-    zhenti_id: str, account_id: str, subject: str, year: str, source: str, item: dict
+    zhenti_id: str, account_id: str, subject: str, year: str, source: str, item: dict,
+    stage: str = "",
 ) -> dict:
     """新真题的初始 frontmatter（练习计数从零开始，含三形态与组织轴字段）"""
     return {
@@ -93,6 +94,7 @@ def new_frontmatter(
         "subject": subject,
         "year": year,
         "source": source,
+        "stage": stage,
         "number": item.get("number") or "",
         "question_form": item.get("question_form", "independent"),
         "question_type": item.get("question_type"),

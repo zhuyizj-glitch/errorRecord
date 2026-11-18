@@ -5,9 +5,10 @@ export interface Child {
   name: string
   emoji: string
   subjects: string[]
+  current_stage?: string
 }
 
-export interface ChildrenResponse { children: Child[]; available_subjects: string[] }
+export interface ChildrenResponse { children: Child[]; available_subjects: string[]; available_stages: string[] }
 
 export interface Account {
   id: string
@@ -129,6 +130,7 @@ export interface ZhentiQuestion {
   subject: string
   year: string
   source: string
+  stage?: string
   number?: string
   question_form: ZhentiForm
   question_type?: string
@@ -190,7 +192,7 @@ export interface ZhentiTask {
   subject: string
   image_ids: Array<{ id: string; path: string; filename: string }>
   kind: string
-  meta: { year?: string; source?: string }
+  meta: { year?: string; source?: string; stage?: string }
   status: 'pending' | 'processing' | 'completed' | 'failed'
   result?: ZhentiAnalyzeResult
   error?: string
@@ -218,4 +220,5 @@ export interface ZhentiDimensions {
   modules: string[]
   question_types: string[]
   ratings: string[]
+  stages: string[]
 }
